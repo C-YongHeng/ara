@@ -18,7 +18,9 @@ package ara_pkg;
   // Maximum size of a single vector element, in bytes.
   localparam int unsigned ELENB = ELEN / 8;
   // Number of bits in a vector register.
-  localparam int unsigned VLEN  = `ifdef VLEN `VLEN `else 0 `endif;
+  // localparam int unsigned VLEN  = `ifdef VLEN `VLEN `else 0 `endif;
+  // !!! VLEN/LANE_NUM >= ELEN !!!
+  localparam int unsigned VLEN  = 512;
   // Number of bytes in a vector register.
   localparam int unsigned VLENB = VLEN / 8;
   // Maximum vector length (in elements).
@@ -241,8 +243,8 @@ package ara_pkg;
   /////////////////////////////
 
   // Use Ariane's accelerator interface.
-  typedef acc_pkg::accelerator_req_t accelerator_req_t;
-  typedef acc_pkg::accelerator_resp_t accelerator_resp_t;
+  typedef ariane_pkg::accelerator_req_t accelerator_req_t;
+  typedef ariane_pkg::accelerator_resp_t accelerator_resp_t;
 
   /////////////////////////
   //  Backend interface  //

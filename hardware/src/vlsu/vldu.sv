@@ -21,10 +21,17 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
   ) (
     input  logic                           clk_i,
     input  logic                           rst_ni,
+  `ifdef ARA_L1_INTF
+    // D$ interface
+    input  logic [AxiDataWidth-1:0]        dcache_rdata_i,
+    input  logic                           dcache_rvalid_i,
+    output logic                           result_queue_full_o,
+  `else
     // Memory interface
     input  axi_r_t                         axi_r_i,
     input  logic                           axi_r_valid_i,
     output logic                           axi_r_ready_o,
+  `endif
     // Interface with dispatcher
     output logic                           load_complete_o,
     // Interface with the main sequencer
@@ -146,6 +153,9 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
   // Is the result queue full?
   logic result_queue_full;
   assign result_queue_full = (result_queue_cnt_q == ResultQueueDepth);
+`ifdef ARA_L1_INTF
+  assign result_queue_full_o = result_queue_full;
+`endif
   // Is the result queue empty?
   logic result_queue_empty;
   assign result_queue_empty = (result_queue_cnt_q == '0);
@@ -216,7 +226,10 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
     // We are not ready, by default
     axi_addrgen_req_ready_o = 1'b0;
     pe_resp                 = '0;
+  `ifdef ARA_L1_INTF
+  `else
     axi_r_ready_o           = 1'b0;
+  `endif
     mask_ready_o            = 1'b0;
     load_complete_o         = 1'b0;
 
@@ -231,8 +244,13 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
     // - There is an R beat available.
     // - The Address Generator sent us the data about the corresponding AR beat
     // - There is place in the result queue to write the data read from the R channel
+  `ifdef ARA_L1_INTF
+    if (dcache_rvalid_i && axi_addrgen_req_valid_i
+        && axi_addrgen_req_i.is_load && !result_queue_full) begin
+  `else
     if (axi_r_valid_i && axi_addrgen_req_valid_i
         && axi_addrgen_req_i.is_load && !result_queue_full) begin
+  `endif
       // Bytes valid in the current R beat
       // If non-unit strided load, we do not progress within the beat
       automatic shortint unsigned lower_byte = beat_lower_byte(axi_addrgen_req_i.addr,
@@ -275,8 +293,13 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
               automatic int vrf_offset = vrf_byte[2:0];
 
               // Copy data and byte strobe
+            `ifdef ARA_L1_INTF
+              result_queue_d[result_queue_write_pnt_q][vrf_lane].wdata[8*vrf_offset +: 8] =
+                dcache_rdata_i[8*axi_byte +: 8];
+            `else
               result_queue_d[result_queue_write_pnt_q][vrf_lane].wdata[8*vrf_offset +: 8] =
                 axi_r_i.data[8*axi_byte +: 8];
+            `endif
               result_queue_d[result_queue_write_pnt_q][vrf_lane].be[vrf_offset] =
                 vinsn_issue_q.vm || mask_i[vrf_lane][vrf_offset];
             end
@@ -317,8 +340,11 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
 
       // Consumed all valid bytes in this R beat
       if (r_pnt_d == upper_byte - lower_byte + 1 || issue_cnt_d == '0) begin
+      `ifdef ARA_L1_INTF
+      `else
         // Request another beat
         axi_r_ready_o = 1'b1;
+      `endif
         r_pnt_d       = '0;
         // Account for the beat we consumed
         len_d         = len_q + 1;

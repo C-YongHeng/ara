@@ -40,9 +40,26 @@ module ara import ara_pkg::*; #(
     // Interface with Ariane
     input  accelerator_req_t  acc_req_i,
     output accelerator_resp_t acc_resp_o,
+
+    output logic              load_is_inprocessing_o,
+    // Interface with TLB
+    output logic                            ara_trans_req_o,
+    output logic [riscv::VLEN-1:0]          ara_trans_vaddr_o,
+    output logic                            ara_trans_is_store_o,
+    input  logic                            ara_trans_dtlb_hit_i,
+    input  logic [riscv::PPNW-1:0]          ara_trans_dtlb_ppn_i,
+    input  logic                            ara_trans_valid_i,
+    input  logic [riscv::PLEN-1:0]          ara_trans_paddr_i,
+    input  ariane_pkg::exception_t          ara_trans_exception_i,
+  `ifdef ARA_L1_INTF
+    // L1 D$ interface
+    output ariane_pkg::dcache_req_i_t [1:0] l1_dcache_req_o,
+    input  ariane_pkg::dcache_req_o_t [1:0] l1_dcache_resp_i
+  `else
     // AXI interface
     output axi_req_t          axi_req_o,
     input  axi_resp_t         axi_resp_i
+  `endif
   );
 
   import cf_math_pkg::idx_width;
@@ -322,9 +339,25 @@ module ara import ara_pkg::*; #(
   ) i_vlsu (
     .clk_i                      (clk_i                                                 ),
     .rst_ni                     (rst_ni                                                ),
+  `ifdef ARA_L1_INTF
+    // L1 D$ interface
+    .l1_dcache_req_o            (l1_dcache_req_o                                       ),
+    .l1_dcache_resp_i           (l1_dcache_resp_i                                      ),
+  `else
     // AXI memory interface
     .axi_req_o                  (axi_req_o                                             ),
     .axi_resp_i                 (axi_resp_i                                            ),
+  `endif
+    .load_is_inprocessing_o     (load_is_inprocessing_o                                ),
+    // Interface with TLB
+    .addrgen_trans_req_o        (ara_trans_req_o                                       ),
+    .addrgen_trans_vaddr_o      (ara_trans_vaddr_o                                     ),
+    .addrgen_trans_is_store_o   (ara_trans_is_store_o                                  ),
+    .addrgen_trans_dtlb_hit_i   (ara_trans_dtlb_hit_i                                  ),
+    .addrgen_trans_dtlb_ppn_i   (ara_trans_dtlb_ppn_i                                  ),
+    .addrgen_trans_valid_i      (ara_trans_valid_i                                     ),
+    .addrgen_trans_paddr_i      (ara_trans_paddr_i                                     ),
+    .addrgen_trans_exception_i  (ara_trans_exception_i                                 ),
     // Interface with the dispatcher
     .core_st_pending_i          (core_st_pending                                       ),
     .load_complete_o            (load_complete                                         ),
@@ -338,7 +371,7 @@ module ara import ara_pkg::*; #(
     .pe_resp_o                  (pe_resp[NrLanes+OffsetStore : NrLanes+OffsetLoad]     ),
     .addrgen_ack_o              (addrgen_ack                                           ),
     .addrgen_exception_o        (addrgen_exception                                     ),
-    .addrgen_exception_vstart_o     (addrgen_exception_vstart                                  ),
+    .addrgen_exception_vstart_o (addrgen_exception_vstart                              ),
     // Interface with the Mask unit
     .mask_i                     (mask                                                  ),
     .mask_valid_i               (mask_valid                                            ),
