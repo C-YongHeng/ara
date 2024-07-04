@@ -33,6 +33,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     input  logic                           axi_aw_ready_i,
   `endif
     output logic                           load_is_inprocessing_o,
+  `ifdef ARA_VA
     // Interface with TLB
     output logic                           addrgen_trans_req_o,
     output logic [riscv::VLEN-1:0]         addrgen_trans_vaddr_o,
@@ -42,6 +43,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     input  logic                           addrgen_trans_valid_i,
     input  logic [riscv::PLEN-1:0]         addrgen_trans_paddr_i,
     input  exception_t                     addrgen_trans_exception_i,
+  `endif
     // Interace with the dispatcher
     input  logic                           core_st_pending_i,
     // Interface with the main sequencer
@@ -139,6 +141,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
   elen_t                            idx_addr;
   logic                             idx_op_error_d, idx_op_error_q;
   vlen_t                            addrgen_exception_vstart_d;
+  exception_t                       idx_op_trans_exception_d, idx_op_trans_exception_q;
 
   // Pointer to point to the correct
   logic [$clog2(NrLanes)-1:0] word_lane_ptr_d, word_lane_ptr_q;
@@ -284,7 +287,9 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             addrgen_req_valid = '0;
             addrgen_ack_o     = 1'b1;
             state_d           = IDLE;
+          `ifdef ARA_VA
             addrgen_exception_o = addrgen_trans_exception_i;
+          `endif
           end
         end
       end
@@ -463,10 +468,11 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     AXI_ADDRGEN_IDLE, AXI_ADDRGEN_MISALIGNED, AXI_ADDRGEN_WAITING, AXI_ADDRGEN_REQUESTING
   } axi_addrgen_state_d, axi_addrgen_state_q;
 
-  exception_t idx_op_trans_exception_d, idx_op_trans_exception_q;
 
 `ifdef ARA_L1_INTF
   logic [2:0] burst_trans_len_d, burst_trans_len_q;
+
+`ifdef ARA_VA
   logic paddr_fifo_push, paddr_fifo_pop;
   logic paddr_fifo_empty, paddr_fifo_full;
   logic [63:0] paddr_fifo_out, paddr_fifo_in;
@@ -491,6 +497,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     .empty_o   (paddr_fifo_empty                                         ),
     .usage_o   (/* Unused */                                             )
   );
+`endif  // ifdef ARA_VA
 
   always_comb begin: L1_addrgen
     // Maintain state
@@ -517,6 +524,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
 
     burst_trans_len_d = burst_trans_len_q;
 
+  `ifdef ARA_VA
     trans_cur_vaddr_n = trans_cur_vaddr;
     trans_end_vaddr_n = trans_end_vaddr;
     trans_counter_n = trans_counter;
@@ -526,6 +534,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     addrgen_trans_req_o = 1'b0;
     addrgen_trans_vaddr_o = '0;
     addrgen_trans_is_store_o = 1'b0;
+  `endif
     flush_fifo = 1'b0;
 
     case (axi_addrgen_state_q)
@@ -534,6 +543,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           axi_addrgen_d       = addrgen_req;
           axi_addrgen_state_d = core_st_pending_i ? AXI_ADDRGEN_WAITING : AXI_ADDRGEN_REQUESTING;
 
+        `ifdef ARA_VA
           trans_cur_vaddr_n = axi_addrgen_d.addr[63:0];
           trans_end_vaddr_n = axi_addrgen_d.addr[63:0] + (axi_addrgen_d.len << int'(axi_addrgen_d.vew)) - 1;
           trans_counter_n = 0;
@@ -542,6 +552,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             trans_counter_n = axi_addrgen_d.len;
             trans_end_vaddr_n = axi_addrgen_d.addr[63:0] + (1<<12);
           end
+        `endif
         end
       end
       AXI_ADDRGEN_WAITING: begin
@@ -555,6 +566,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           //  Unit-Stride access //
           /////////////////////////
 
+        `ifdef ARA_VA
           // access TLB
           if(trans_cur_vaddr[63:12] <= trans_end_vaddr[63:12] && !paddr_fifo_full) begin
             addrgen_trans_req_o = 1'b1;
@@ -571,9 +583,12 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               end
             end
           end
+        `endif
 
           // access L1 Dcache
+        `ifdef ARA_VA
           if(!paddr_fifo_empty) begin
+        `endif
             if (axi_addrgen_q.is_load) begin
               l1_dcache_req_o[0] = '{
                 address_index: axi_addrgen_q.addr[DCACHE_INDEX_WIDTH-1:0],  // DCACHE_INDEX_WIDTH must less than 12!!!
@@ -587,6 +602,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               axi_addrgen_queue_push = ~axi_addrgen_queue_full;
             end
 
+        `ifdef ARA_VA
             // Send this request to the load/store units
             axi_addrgen_queue = '{
               addr   : {paddr_fifo_out[63:12], axi_addrgen_q.addr[11:0]}, //physical address
@@ -595,6 +611,15 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               is_load: axi_addrgen_q.is_load
             };
           end
+        `else
+          // Send this request to the load/store units
+          axi_addrgen_queue = '{
+            addr   : axi_addrgen_q.addr, //physical address
+            len    : 0,
+            size   : axi_data_size,
+            is_load: axi_addrgen_q.is_load
+          };
+        `endif
 
           // calculate vector length
           if(axi_addrgen_queue_push) begin
@@ -615,11 +640,15 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             // next access address
             axi_addrgen_d.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] = axi_addrgen_q.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] + 1;
             axi_addrgen_d.addr[$clog2(AxiDataWidth/8)-1:0] = '0;
+
+            `ifdef ARA_VA
             if(axi_addrgen_d.addr[63:12] != axi_addrgen_q.addr[63:12]) begin  // next page, pop the ppn
               paddr_fifo_pop = 1'b1;
             end
+            `endif
           end
 
+        `ifdef ARA_VA
           // Finished generating Cache requests
           if (axi_addrgen_d.len == 0) begin
             paddr_fifo_pop = 1'b1;  // pop the last ppn
@@ -631,12 +660,23 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
             flush_fifo = 1'b1;
           end
+        `else
+          // first data has been handled, so we can return ready
+          if (axi_addrgen_q.len == addrgen_req.len && burst_trans_len_q == 0 && axi_addrgen_queue_push) begin
+            addrgen_req_ready   = 1'b1;
+          end
+
+          // Finished generating AXI requests
+          if (axi_addrgen_d.len == 0) begin
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+          end
+        `endif
         end else if (state_q != ADDRGEN_IDX_OP) begin
 
           /////////////////////
           //  Strided access //
           /////////////////////
-
+        `ifdef ARA_VA
           // access TLB
           if(trans_counter != 0 && !paddr_fifo_full) begin
             addrgen_trans_req_o = 1'b1;
@@ -655,9 +695,12 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               end
             end
           end
+        `endif
 
           // access L1 Dcache
+        `ifdef ARA_VA
           if(!paddr_fifo_empty) begin
+        `endif
             if (axi_addrgen_q.is_load) begin
               l1_dcache_req_o[0] = '{
                 address_index: axi_addrgen_q.addr[DCACHE_INDEX_WIDTH-1:0],
@@ -672,6 +715,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               axi_addrgen_queue_push = ~axi_addrgen_queue_full;
             end
 
+        `ifdef ARA_VA
             // Send this request to the load/store units
             axi_addrgen_queue = '{
               addr   : {paddr_fifo_out[63:12], axi_addrgen_q.addr[11:0]}, //physical address
@@ -680,17 +724,29 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               is_load: axi_addrgen_q.is_load
             };
           end
+        `else
+          // Send this request to the load/store units
+          axi_addrgen_queue = '{
+            addr   : axi_addrgen_q.addr,
+            size   : axi_addrgen_q.vew,
+            len    : 0,
+            is_load: axi_addrgen_q.is_load
+          };
+        `endif
 
           if(axi_addrgen_queue_push) begin
             // Account for the requested operands
             axi_addrgen_d.len  = axi_addrgen_q.len - 1;
             // Calculate the addresses for the next iteration, adding the correct stride
             axi_addrgen_d.addr = axi_addrgen_q.addr + axi_addrgen_q.stride;
+          `ifdef ARA_VA
             if(axi_addrgen_d.addr[63:12] != axi_addrgen_q.addr[63:12]) begin  // next page, pop the ppn
               paddr_fifo_pop = 1'b1;
             end
+          `endif
           end
 
+        `ifdef ARA_VA
           // Finished generating AXI requests
           if (axi_addrgen_d.len == 0) begin
             paddr_fifo_pop = 1'b1;  // pop the last ppn
@@ -702,12 +758,23 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
             flush_fifo = 1'b1;
           end
+        `else
+          // first data has been handled, so we can return ready
+          if (axi_addrgen_q.len == addrgen_req.len && axi_addrgen_queue_push) begin
+            addrgen_req_ready   = 1'b1;
+          end
+
+          // Finished generating AXI requests
+          if (axi_addrgen_d.len == 0) begin
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+          end
+        `endif
         end else begin
 
           //////////////////////
           //  Indexed access  //
           //////////////////////
-
+        `ifdef ARA_VA
           // access TLB
           if (trans_counter != 0 && idx_addr_valid_q && !paddr_fifo_full) begin
             addrgen_trans_req_o = 1'b1;
@@ -757,7 +824,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           end
 
           // Check if the address does generate an exception
-          if (is_addr_error(idx_final_addr_q, axi_addrgen_q.vew)) begin
+          if (idx_addr_valid_q && is_addr_error(idx_final_addr_q, axi_addrgen_q.vew)) begin
             // Generate an error
             idx_op_error_d          = 1'b1;
             // Forward next vstart info to the dispatcher
@@ -777,6 +844,53 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             idx_op_trans_exception_d = addrgen_trans_exception_i;
             flush_fifo = 1'b1;
           end
+        `else // if no define ARA_VA
+          if (idx_addr_valid_q) begin
+            if (axi_addrgen_q.is_load) begin
+              l1_dcache_req_o[0] = '{
+                address_index: idx_final_addr_q[DCACHE_INDEX_WIDTH-1:0],
+                data_req: ~axi_addrgen_queue_full,
+                data_size: axi_addrgen_q.vew[1:0], // L1 D$ size just 2 bits
+                default: '0
+              };
+              axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+            end else begin
+              axi_addrgen_queue_push = ~axi_addrgen_queue_full;
+            end
+
+            // We consumed a word
+            idx_addr_ready_d = axi_addrgen_queue_push;
+
+            // Send this request to the load/store units
+            axi_addrgen_queue = '{
+              addr   : idx_final_addr_q,
+              size   : axi_addrgen_q.vew,
+              len    : 0,
+              is_load: axi_addrgen_q.is_load
+            };
+
+            // Account for the requested operands
+            if(axi_addrgen_queue_push) begin
+              axi_addrgen_d.len = axi_addrgen_q.len - 1;
+            end
+
+            // Check if the address does generate an exception
+            if (is_addr_error(idx_final_addr_q, axi_addrgen_q.vew)) begin
+              // Generate an error
+              idx_op_error_d          = 1'b1;
+              // Forward next vstart info to the dispatcher
+              addrgen_exception_vstart_d = addrgen_req.len - axi_addrgen_q.len - 1;
+              addrgen_req_ready       = 1'b1;
+              axi_addrgen_state_d     = AXI_ADDRGEN_IDLE;
+            end
+
+            // Finished generating AXI requests
+            if (axi_addrgen_d.len == 0) begin
+              addrgen_req_ready   = 1'b1;
+              axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+            end
+          end
+        `endif
         end
       end
     endcase
@@ -801,19 +915,23 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     if (!rst_ni) begin
       axi_addrgen_state_q  <= AXI_ADDRGEN_IDLE;
       axi_addrgen_q        <= '0;
-
       burst_trans_len_q    <= '0;
+
+    `ifdef ARA_VA
       trans_cur_vaddr      <= '0;
       trans_end_vaddr      <= '0;
       trans_counter        <= '0;
+    `endif
     end else begin
       axi_addrgen_state_q  <= axi_addrgen_state_d;
       axi_addrgen_q        <= axi_addrgen_d;
-
       burst_trans_len_q    <= burst_trans_len_d;
+
+    `ifdef ARA_VA
       trans_cur_vaddr      <= trans_cur_vaddr_n;
       trans_end_vaddr      <= trans_end_vaddr_n;
       trans_counter        <= trans_counter_n;
+    `endif
     end
   end
 `else

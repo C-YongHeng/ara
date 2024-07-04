@@ -37,6 +37,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     input  axi_resp_t               axi_resp_i,
   `endif
     output logic                    load_is_inprocessing_o,
+  `ifdef ARA_VA
     // Interface with TLB
     output logic                    addrgen_trans_req_o,
     output logic [riscv::VLEN-1:0]  addrgen_trans_vaddr_o,
@@ -46,6 +47,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     input  logic                    addrgen_trans_valid_i,
     input  logic [riscv::PLEN-1:0]  addrgen_trans_paddr_i,
     input  exception_t              addrgen_trans_exception_i,
+  `endif
     // Interface with the dispatcher
     input  logic                    core_st_pending_i,
     output logic                    load_complete_o,
@@ -185,6 +187,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     .axi_ar_ready_i             (axi_resp.ar_ready          ),
   `endif
     .load_is_inprocessing_o     (load_is_inprocessing_o     ),
+  `ifdef ARA_VA
     .addrgen_trans_req_o        (addrgen_trans_req_o        ),
     .addrgen_trans_vaddr_o      (addrgen_trans_vaddr_o      ),
     .addrgen_trans_is_store_o   (addrgen_trans_is_store_o   ),
@@ -193,6 +196,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     .addrgen_trans_valid_i      (addrgen_trans_valid_i      ),
     .addrgen_trans_paddr_i      (addrgen_trans_paddr_i      ),
     .addrgen_trans_exception_i  (addrgen_trans_exception_i  ),  
+  `endif
     // Interface with dispatcher
     .core_st_pending_i          (core_st_pending_i          ),
     // Interface with the sequencer
