@@ -411,7 +411,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   assign stu_exception_flush      = StuExLat == 0 ? stu_exception_flush_i : stu_exception_flush_q[StuExLat-1];
   for (genvar i = 0; i < StuExLat; i++) begin
     assign stu_exception_flush_d[i+1] = stu_exception_flush_q[i];
-    `FF(stu_exception_flush_q[i], stu_exception_flush_d[i], 1'b0);
+    `FF(stu_exception_flush_q[i], stu_exception_flush_d[i], 1'b0)
   end
 
   operand_queues_stage #(

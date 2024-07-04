@@ -1097,9 +1097,9 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
       assign vfpu_flag_mask_d[0]= vfpu_simd_mask;
       for (genvar i = 0; i < LatFNonComp; i++) begin
 
-        `FF(operand_a_d[i+1], operand_a_d[i], '0);
+        `FF(operand_a_d[i+1], operand_a_d[i], '0)
 
-        `FF(vfpu_flag_mask_d[i+1], vfpu_flag_mask_d[i],'0);
+        `FF(vfpu_flag_mask_d[i+1], vfpu_flag_mask_d[i],'0)
         end
 
       assign operand_a_delay = operand_a_d[LatFNonComp];
