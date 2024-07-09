@@ -355,7 +355,11 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
             // Operand request
             operand_req[bank][requester] = !stall;
             operand_payload[requester]   = '{
-              addr   : requester_q.addr >> $clog2(NrBanks),
+              // addr   : requester_q.addr >> $clog2(NrBanks),
+              addr   : {{$clog2(NrBanks){1'b0}}, requester_q.addr[$size(vaddr_t)-1:$clog2(NrBanks)]},
+              wdata  : elen_t'(0),
+              be     : strb_t'(0),
+              wen    : 1'b0,
               opqueue: opqueue_e'(requester),
               default: '0
             };
@@ -454,35 +458,45 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
 
     // Generate the payload
     operand_payload[NrOperandQueues + VFU_Alu] = '{
-      addr   : alu_result_addr_i >> $clog2(NrBanks),
+      // addr   : alu_result_addr_i >> $clog2(NrBanks),
+      addr   : {{$clog2(NrBanks){1'b0}}, alu_result_addr_i[$size(vaddr_t)-1:$clog2(NrBanks)]},
+      opqueue: opqueue_e'(0),
       wen    : 1'b1,
       wdata  : alu_result_wdata_i,
       be     : alu_result_be_i,
       default: '0
     };
     operand_payload[NrOperandQueues + VFU_MFpu] = '{
-      addr   : mfpu_result_addr_i >> $clog2(NrBanks),
+      // addr   : mfpu_result_addr_i >> $clog2(NrBanks),
+      addr   : {{$clog2(NrBanks){1'b0}}, mfpu_result_addr_i[$size(vaddr_t)-1:$clog2(NrBanks)]},
+      opqueue: opqueue_e'(0),
       wen    : 1'b1,
       wdata  : mfpu_result_wdata_i,
       be     : mfpu_result_be_i,
       default: '0
     };
     operand_payload[NrOperandQueues + VFU_MaskUnit] = '{
-      addr   : masku_result_addr >> $clog2(NrBanks),
+      // addr   : masku_result_addr >> $clog2(NrBanks),
+      addr   : {{$clog2(NrBanks){1'b0}}, masku_result_addr[$size(vaddr_t)-1:$clog2(NrBanks)]},
+      opqueue: opqueue_e'(0),
       wen    : 1'b1,
       wdata  : masku_result_wdata,
       be     : masku_result_be,
       default: '0
     };
     operand_payload[NrOperandQueues + VFU_SlideUnit] = '{
-      addr   : sldu_result_addr >> $clog2(NrBanks),
+      // addr   : sldu_result_addr >> $clog2(NrBanks),
+      addr   : {{$clog2(NrBanks){1'b0}}, sldu_result_addr[$size(vaddr_t)-1:$clog2(NrBanks)]},
+      opqueue: opqueue_e'(0),
       wen    : 1'b1,
       wdata  : sldu_result_wdata,
       be     : sldu_result_be,
       default: '0
     };
     operand_payload[NrOperandQueues + VFU_LoadUnit] = '{
-      addr   : ldu_result_addr >> $clog2(NrBanks),
+      // addr   : ldu_result_addr >> $clog2(NrBanks),
+      addr   : {{$clog2(NrBanks){1'b0}}, ldu_result_addr[$size(vaddr_t)-1:$clog2(NrBanks)]},
+      opqueue: opqueue_e'(0),
       wen    : 1'b1,
       wdata  : ldu_result_wdata,
       be     : ldu_result_be,

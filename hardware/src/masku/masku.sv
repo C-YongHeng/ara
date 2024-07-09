@@ -517,8 +517,9 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
         VIOTA: begin
           if (&masku_operand_a_valid_i) begin
             alu_operand_b_seq_m = alu_operand_b_seq & bit_enable_mask;
-            unique case (vinsn_issue.vtype.vsew)
-              EW8 : begin
+            // unique case (vinsn_issue.vtype.vsew)
+            //   EW8 : begin
+              if(vinsn_issue.vtype.vsew == EW8) begin
                 if (issue_cnt_q < vinsn_issue.vl) begin
                   alu_result_vm [7:0] = alu_operand_b_seq_ff [(NrLanes*DataWidth)-1-:8] + alu_result_ff [(NrLanes*DataWidth)-1-:8];
                 end else begin
@@ -529,7 +530,8 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
                   alu_result_vm_m [(index*8) +: 7] = (|mask[(index*8) +: 7]) ? alu_result_vm [(index*8) +: 7] : masku_operand_vd [(index*8) +: 7];
                 end
               end
-              EW16: begin
+              // EW16: begin
+              else if(vinsn_issue.vtype.vsew == EW16) begin
                 if (issue_cnt_q < vinsn_issue.vl) begin
                   alu_result_vm [15:0] = alu_operand_b_seq_ff [(NrLanes*DataWidth)-1-:16] + alu_result_ff [(NrLanes*DataWidth)-1-:16];
                 end else begin
@@ -540,7 +542,8 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
                   alu_result_vm_m [(index*16) +: 15] = (|mask[(index*16) +: 15]) ? alu_result_vm [(index*16) +: 15] : masku_operand_vd [(index*16) +: 15];
                 end
               end
-              EW32: begin
+              // EW32: begin
+              else if(vinsn_issue.vtype.vsew == EW32) begin
                 if (issue_cnt_q < vinsn_issue.vl) begin
                   alu_result_vm [31:0] = alu_operand_b_seq_ff [(NrLanes*DataWidth)-1-:32] + alu_result_ff [(NrLanes*DataWidth)-1-:32];
                 end else begin
@@ -551,7 +554,8 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
                   alu_result_vm_m [(index*32) +: 31] = (|mask[(index*32) +: 31]) ? alu_result_vm [(index*32) +: 31] : masku_operand_vd [(index*32) +: 31];
                 end
               end
-              EW64: begin
+              // EW64: begin
+              else if(vinsn_issue.vtype.vsew == EW64) begin
                 if (issue_cnt_q < vinsn_issue.vl) begin
                   alu_result_vm [63:0] = alu_operand_b_seq_ff [(NrLanes*DataWidth)-1-:64] + alu_result_ff [(NrLanes*DataWidth)-1-:64];
                 end else begin
@@ -562,37 +566,41 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
                   alu_result_vm_m [(index*64) +: 63] = (|mask[(index*64) +: 63]) ? alu_result_vm [(index*64) +: 63] : masku_operand_vd [(index*64) +: 63];
                 end
               end
-            endcase
+            // endcase
           end
         end
         VID: begin
           if (&masku_operand_a_valid_i) begin
-            unique case (vinsn_issue.vtype.vsew)
-              EW8 : begin
+            // unique case (vinsn_issue.vtype.vsew)
+            //   EW8 : begin
+              if(vinsn_issue.vtype.vsew == EW8) begin
                 for (int index = 1; index < (NrLanes*DataWidth)/8; index++) begin
                   alu_result_vm [(index*8) +: 7] = (((NrLanes * DataWidth)/8) >= vinsn_issue.vl) ? index : index-(((vinsn_issue.vl/((NrLanes * DataWidth)/8))-iteration_count_d)*32);
                   alu_result_vm_m = alu_result_vm & mask;
                 end
               end
-              EW16: begin
+              // EW16: begin
+              else if(vinsn_issue.vtype.vsew == EW16) begin
                 for (int index = 1; index < (NrLanes*DataWidth)/16; index++) begin
                   alu_result_vm [(index*16) +: 15] = (((NrLanes * DataWidth)/8) >= vinsn_issue.vl) ? index : index-(((vinsn_issue.vl/((NrLanes * DataWidth)/8))-iteration_count_d)*16);
                   alu_result_vm_m = alu_result_vm & mask;
                 end
               end
-              EW32: begin
+              // EW32: begin
+              else if(vinsn_issue.vtype.vsew == EW32) begin
                 for (int index = 1; index < (NrLanes*DataWidth)/32; index++) begin
                   alu_result_vm [(index*32) +: 31] = (((NrLanes * DataWidth)/8) >= vinsn_issue.vl) ? index : index-(((vinsn_issue.vl/((NrLanes * DataWidth)/8))-iteration_count_d)*8);
                   alu_result_vm_m = alu_result_vm & mask;
                 end
               end
-              EW64: begin
+              // EW64: begin
+              else if(vinsn_issue.vtype.vsew == EW64) begin
                 for (int index = 1; index < (NrLanes*DataWidth)/64; index++) begin
                   alu_result_vm [(index*64) +: 63] = (((NrLanes * DataWidth)/8) >= vinsn_issue.vl) ? index : index-(((vinsn_issue.vl/((NrLanes * DataWidth)/8))-iteration_count_d)*4);
                   alu_result_vm_m = alu_result_vm & mask;
                 end
               end
-            endcase
+            // endcase
           end
         end
         [VCPOP:VFIRST] : begin
