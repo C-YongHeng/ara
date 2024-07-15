@@ -22,7 +22,8 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
   `ifdef ARA_L1_INTF
     // L1 interface
     output dcache_req_i_t [1:0]            l1_dcache_req_o,
-    input  logic [1:0]                     l1_dcache_gnt_i, 
+    input  logic [1:0]                     l1_dcache_gnt_i,
+    input  logic                           l1_load_rvalid_i,
   `else
     // Memory interface
     output axi_ar_t                        axi_ar_o,
@@ -117,7 +118,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
   ) i_addrgen_req_queue (
     .clk_i     (clk_i                                                    ),
     .rst_ni    (rst_ni                                                   ),
-    .flush_i   (flush_fifo                                               ),
+    .flush_i   (1'b0                                                     ),
     .testmode_i(1'b0                                                     ),
     .data_i    (axi_addrgen_queue                                        ),
     .push_i    (axi_addrgen_queue_push                                   ),
@@ -141,7 +142,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
   elen_t                            idx_addr;
   logic                             idx_op_error_d, idx_op_error_q;
   vlen_t                            addrgen_exception_vstart_d;
-  exception_t                       idx_op_trans_exception_d, idx_op_trans_exception_q;
+  exception_t                       trans_exception_d, trans_exception_q;
 
   // Pointer to point to the correct
   logic [$clog2(NrLanes)-1:0] word_lane_ptr_d, word_lane_ptr_q;
@@ -184,7 +185,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     IDLE,
     ADDRGEN,
     ADDRGEN_IDX_OP,
-    ADDRGEN_IDX_OP_END
+    ADDRGEN_END
   } state_q, state_d;
 
   always_comb begin: addr_generation
@@ -285,11 +286,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
 
           if (addrgen_req_ready) begin
             addrgen_req_valid = '0;
-            addrgen_ack_o     = 1'b1;
-            state_d           = IDLE;
-          `ifdef ARA_VA
-            addrgen_exception_o = addrgen_trans_exception_i;
-          `endif
+            state_d           = ADDRGEN_END;  // there is a critical path after adding a TLB, so return ack in next cycle
           end
         end
       end
@@ -374,12 +371,12 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
         end
 
         if (idx_op_error_d || addrgen_req_ready) begin
-          state_d = ADDRGEN_IDX_OP_END;
+          state_d = ADDRGEN_END;
         end
       end
 
       // This state exists not to create combinatorial paths on the interface
-      ADDRGEN_IDX_OP_END : begin
+      ADDRGEN_END : begin
         // Acknowledge the indexed memory operation
         addrgen_ack_o     = 1'b1;
         addrgen_req_valid = '0;
@@ -388,7 +385,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
         elm_ptr_d       = '0;
         word_lane_ptr_d = '0;
         // Raise an error if necessary
-        addrgen_exception_o = idx_op_trans_exception_q;   // TLB translation exception
+        addrgen_exception_o = trans_exception_q;   // TLB translation exception
         if (idx_op_error_q) begin
           addrgen_exception_o.valid = 1'b1;
           addrgen_exception_o.cause = riscv::ILLEGAL_INSTR;
@@ -422,7 +419,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
       idx_op_cnt_q       <= idx_op_cnt_d;
       last_elm_subw_q    <= last_elm_subw_d;
       idx_op_error_q     <= idx_op_error_d;
-      idx_op_trans_exception_q   <= idx_op_trans_exception_d;
+      trans_exception_q   <= trans_exception_d;
       addrgen_exception_vstart_o <= addrgen_exception_vstart_d;
     end
   end
@@ -471,6 +468,28 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
 
 `ifdef ARA_L1_INTF
   logic [2:0] burst_trans_len_d, burst_trans_len_q;
+  logic [DCACHE_TAG_WIDTH-1:0] tag_fifo_in, tag_fifo_out;
+  logic tag_fifo_empty, tag_fifo_full;
+  logic tag_fifo_push, tag_fifo_pop;
+  assign tag_fifo_pop = l1_load_rvalid_i;
+
+  // Load tag queue
+  fifo_v3 #(
+    .DEPTH( 2                               ),
+    .dtype( logic[DCACHE_TAG_WIDTH-1:0]     )
+  ) i_addrgen_tag_queue (
+    .clk_i     (clk_i                                                    ),
+    .rst_ni    (rst_ni                                                   ),
+    .flush_i   (1'b0                                                     ),
+    .testmode_i(1'b0                                                     ),
+    .data_i    (tag_fifo_in                                              ),
+    .push_i    (tag_fifo_push                                            ),
+    .full_o    (tag_fifo_full                                            ),
+    .data_o    (tag_fifo_out                                             ),
+    .pop_i     (tag_fifo_pop                                             ),
+    .empty_o   (tag_fifo_empty                                           ),
+    .usage_o   (/* Unused */                                             )
+  );
 
 `ifdef ARA_VA
   logic paddr_fifo_push, paddr_fifo_pop;
@@ -509,7 +528,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
 
     // No error by default
     idx_op_error_d = 1'b0;
-    idx_op_trans_exception_d = '0;
+    trans_exception_d = '0;
 
     // No addrgen request to acknowledge
     addrgen_req_ready = 1'b0;
@@ -517,6 +536,9 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     // No addrgen command to the load/store units
     axi_addrgen_queue      = '0;
     axi_addrgen_queue_push = 1'b0;
+
+    tag_fifo_in = '0;
+    tag_fifo_push = 1'b0;
 
     l1_dcache_req_o[0] = '0;
     l1_dcache_req_o[1] = '0;
@@ -587,16 +609,17 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
 
           // access L1 Dcache
         `ifdef ARA_VA
-          if(!paddr_fifo_empty) begin
+          if(!paddr_fifo_empty && !addrgen_trans_exception_i.valid) begin
         `endif
             if (axi_addrgen_q.is_load) begin
               l1_dcache_req_o[0] = '{
                 address_index: axi_addrgen_q.addr[DCACHE_INDEX_WIDTH-1:0],  // DCACHE_INDEX_WIDTH must less than 12!!!
-                data_req: ~axi_addrgen_queue_full,
+                data_req: (~axi_addrgen_queue_full & ~tag_fifo_full),
                 data_size: 2'b11, // just for access non-cacheable region, max 64 bits
                 default: '0
               };
               axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+              tag_fifo_push          = l1_dcache_gnt_i[0];
               load_is_inprocessing_o = 1'b1;
             end else begin
               axi_addrgen_queue_push = ~axi_addrgen_queue_full;
@@ -620,6 +643,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             is_load: axi_addrgen_q.is_load
           };
         `endif
+          tag_fifo_in = axi_addrgen_queue.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
 
           // calculate vector length
           if(axi_addrgen_queue_push) begin
@@ -658,6 +682,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           if(addrgen_trans_exception_i.valid) begin // TLB raise a exception, kill this access
             addrgen_req_ready = 1'b1;
             axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+            trans_exception_d = addrgen_trans_exception_i;
             flush_fifo = 1'b1;
           end
         `else
@@ -699,16 +724,17 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
 
           // access L1 Dcache
         `ifdef ARA_VA
-          if(!paddr_fifo_empty) begin
+          if(!paddr_fifo_empty && !addrgen_trans_exception_i.valid) begin
         `endif
             if (axi_addrgen_q.is_load) begin
               l1_dcache_req_o[0] = '{
                 address_index: axi_addrgen_q.addr[DCACHE_INDEX_WIDTH-1:0],
-                data_req: ~axi_addrgen_queue_full,
+                data_req: (~axi_addrgen_queue_full & ~tag_fifo_full),
                 data_size: axi_addrgen_q.vew[1:0], // L1 D$ size just 2 bits
                 default: '0
               };
               axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+              tag_fifo_push          = l1_dcache_gnt_i[0];
               load_is_inprocessing_o = 1'b1;
             end
             else begin
@@ -733,6 +759,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             is_load: axi_addrgen_q.is_load
           };
         `endif
+          tag_fifo_in = axi_addrgen_queue.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
 
           if(axi_addrgen_queue_push) begin
             // Account for the requested operands
@@ -756,6 +783,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           if(addrgen_trans_exception_i.valid) begin // TLB raise a exception, kill this access
             addrgen_req_ready = 1'b1;
             axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+            trans_exception_d = addrgen_trans_exception_i;
             flush_fifo = 1'b1;
           end
         `else
@@ -795,15 +823,16 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           end
 
           // access Dcache
-          if(!paddr_fifo_empty) begin
+          if(!paddr_fifo_empty && !addrgen_trans_exception_i.valid) begin
             if (axi_addrgen_q.is_load) begin
               l1_dcache_req_o[0] = '{
                 address_index: paddr_fifo_out[DCACHE_INDEX_WIDTH-1:0],
-                data_req: ~axi_addrgen_queue_full,
+                data_req: (~axi_addrgen_queue_full & ~tag_fifo_full),
                 data_size: axi_addrgen_q.vew[1:0], // L1 D$ size just 2 bits
                 default: '0
               };
               axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+              tag_fifo_push          = l1_dcache_gnt_i[0];
             end else begin
               axi_addrgen_queue_push = ~axi_addrgen_queue_full;
             end
@@ -815,6 +844,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               len    : 0,
               is_load: axi_addrgen_q.is_load
             };
+            tag_fifo_in = axi_addrgen_queue.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
           end
 
           // Account for the requested operands
@@ -841,7 +871,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           if(addrgen_trans_exception_i.valid) begin // TLB raise a exception, kill this access
             addrgen_req_ready = 1'b1;
             axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
-            idx_op_trans_exception_d = addrgen_trans_exception_i;
+            trans_exception_d = addrgen_trans_exception_i;
             flush_fifo = 1'b1;
           end
         `else // if no define ARA_VA
@@ -849,11 +879,12 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
             if (axi_addrgen_q.is_load) begin
               l1_dcache_req_o[0] = '{
                 address_index: idx_final_addr_q[DCACHE_INDEX_WIDTH-1:0],
-                data_req: ~axi_addrgen_queue_full,
+                data_req: (~axi_addrgen_queue_full & ~tag_fifo_full),
                 data_size: axi_addrgen_q.vew[1:0], // L1 D$ size just 2 bits
                 default: '0
               };
               axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+              tag_fifo_push          = l1_dcache_gnt_i[0];
             end else begin
               axi_addrgen_queue_push = ~axi_addrgen_queue_full;
             end
@@ -868,6 +899,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               len    : 0,
               is_load: axi_addrgen_q.is_load
             };
+            tag_fifo_in = axi_addrgen_queue.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
 
             // Account for the requested operands
             if(axi_addrgen_queue_push) begin
@@ -904,10 +936,10 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
       };
     end
 
-    // send tag to D$
-    if(!axi_addrgen_queue_empty && axi_addrgen_req_o.is_load) begin
+    // send load tag to D$
+    if(!tag_fifo_empty) begin
       l1_dcache_req_o[0].tag_valid = 1'b1;
-      l1_dcache_req_o[0].address_tag = axi_addrgen_req_o.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
+      l1_dcache_req_o[0].address_tag = tag_fifo_out;
     end
   end: L1_addrgen
 
@@ -1303,7 +1335,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
   assign addrgen_trans_req_o = 1'b0;
   assign addrgen_trans_vaddr_o = '0;
   assign addrgen_trans_is_store_o = 1'b0;
-  assign idx_op_trans_exception_d = '0;
+  assign trans_exception_d = '0;
   assign flush_fifo = 1'b0;
 `endif
 

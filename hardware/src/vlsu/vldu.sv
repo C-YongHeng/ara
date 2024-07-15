@@ -25,7 +25,7 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
     // D$ interface
     input  logic [AxiDataWidth-1:0]        dcache_rdata_i,
     input  logic                           dcache_rvalid_i,
-    output logic                           result_queue_full_o,
+    output logic                           dcache_rready_o,
   `else
     // Memory interface
     input  axi_r_t                         axi_r_i,
@@ -153,9 +153,6 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
   // Is the result queue full?
   logic result_queue_full;
   assign result_queue_full = (result_queue_cnt_q == ResultQueueDepth);
-`ifdef ARA_L1_INTF
-  assign result_queue_full_o = result_queue_full;
-`endif
   // Is the result queue empty?
   logic result_queue_empty;
   assign result_queue_empty = (result_queue_cnt_q == '0);
@@ -227,6 +224,7 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
     axi_addrgen_req_ready_o = 1'b0;
     pe_resp                 = '0;
   `ifdef ARA_L1_INTF
+    dcache_rready_o         = 1'b0;
   `else
     axi_r_ready_o           = 1'b0;
   `endif
@@ -341,6 +339,7 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
       // Consumed all valid bytes in this R beat
       if (r_pnt_d == upper_byte - lower_byte + 1 || issue_cnt_d == '0) begin
       `ifdef ARA_L1_INTF
+        dcache_rready_o = 1'b1;
       `else
         // Request another beat
         axi_r_ready_o = 1'b1;

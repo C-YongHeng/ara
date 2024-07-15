@@ -103,15 +103,17 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
   logic [AxiDataWidth-1:0] dcache_wdata;
   logic [AxiDataWidth/8-1:0] dcache_wbe;
   logic dcache_wvalid;
+  logic [AxiDataWidth-1:0] dcache_rdata;
+  logic dcache_rvalid, dcache_rready;
 
-  logic load_result_queue_full;
+  logic load_data_fifo_full, load_data_fifo_empty;
 
   // read port
   assign l1_dcache_req_o[0].address_index = l1_dcache_req_addrgen[0].address_index;
   assign l1_dcache_req_o[0].address_tag = l1_dcache_req_addrgen[0].address_tag;
   assign l1_dcache_req_o[0].data_req = l1_dcache_req_addrgen[0].data_req;
   assign l1_dcache_req_o[0].data_size = l1_dcache_req_addrgen[0].data_size;
-  assign l1_dcache_req_o[0].tag_valid = l1_dcache_req_addrgen[0].tag_valid & ~load_result_queue_full;
+  assign l1_dcache_req_o[0].tag_valid = l1_dcache_req_addrgen[0].tag_valid & ~load_data_fifo_full;
   assign l1_dcache_req_o[0].data_wdata = 'b0;
   assign l1_dcache_req_o[0].data_we= 1'b0;
   assign l1_dcache_req_o[0].data_be = 'b0;
@@ -127,6 +129,26 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
   assign l1_dcache_req_o[1].data_we= 1'b1;
   assign l1_dcache_req_o[1].data_be = dcache_wbe;
   assign l1_dcache_req_o[1].kill_req = 1'b0;
+
+  // Load data queue
+  fifo_v3 #(
+    .DEPTH( 2                           ),
+    .dtype( logic[AxiDataWidth-1:0]     )
+  ) i_load_data_queue (
+    .clk_i     (clk_i                                                    ),
+    .rst_ni    (rst_ni                                                   ),
+    .flush_i   (1'b0                                                     ),
+    .testmode_i(1'b0                                                     ),
+    .data_i    (l1_dcache_resp_i[0].data_rdata                           ),
+    .push_i    (l1_dcache_resp_i[0].data_rvalid                          ),
+    .full_o    (load_data_fifo_full                                      ),
+    .data_o    (dcache_rdata                                             ),
+    .pop_i     (dcache_rready                                            ),
+    .empty_o   (load_data_fifo_empty                                     ),
+    .usage_o   (/* Unused */                                             )
+  );
+  assign dcache_rvalid = ~load_data_fifo_empty;
+
 `else
 
   ///////////////
@@ -177,6 +199,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
   `ifdef ARA_L1_INTF
     .l1_dcache_req_o            (l1_dcache_req_addrgen      ),
     .l1_dcache_gnt_i            ({l1_dcache_resp_i[1].data_gnt, l1_dcache_resp_i[0].data_gnt}),
+    .l1_load_rvalid_i           (l1_dcache_resp_i[0].data_rvalid),
   `else
     // AXI Memory Interface
     .axi_aw_o                   (axi_req.aw                 ),
@@ -234,9 +257,9 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     .clk_i                  (clk_i                     ),
     .rst_ni                 (rst_ni                    ),
   `ifdef ARA_L1_INTF
-    .dcache_rdata_i         (l1_dcache_resp_i[0].data_rdata),
-    .dcache_rvalid_i        (l1_dcache_resp_i[0].data_rvalid),
-    .result_queue_full_o    (load_result_queue_full    ),
+    .dcache_rdata_i         (dcache_rdata              ),
+    .dcache_rvalid_i        (dcache_rvalid             ),
+    .dcache_rready_o        (dcache_rready             ),
   `else
     // AXI Memory Interface
     .axi_r_i                (axi_resp.r                ),
