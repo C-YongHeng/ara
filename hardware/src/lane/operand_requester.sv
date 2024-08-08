@@ -539,7 +539,8 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     rr_arb_tree #(
       .NumIn    (int'(MulFPUC) - int'(AluA) + 1 + int'(VFU_MFpu) - int'(VFU_Alu) + 1),
       .DataWidth($bits(payload_t)                                                   ),
-      .AxiVldRdy(1'b0                                                               )
+      .AxiVldRdy(1'b0                                                               ),
+      .FairArb  (1'b0                                                               )
     ) i_hp_vrf_arbiter (
       .clk_i  (clk_i ),
       .rst_ni (rst_ni),
