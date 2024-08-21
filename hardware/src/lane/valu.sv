@@ -538,7 +538,8 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
         INTRA_LANE_REDUCTION: begin
           // If the workload is unbalanced and some lanes already have commit_cnt == '0,
           // delay the commit until we are over with the inter-lanes phase
-          prevent_commit = 1'b1;
+          // cyh: we can commit last instruction in the reduction first cycle
+          prevent_commit = ~first_op_q;
           // Stall only if this is the first operation for this reduction instruction and the result queue is full
           if (!(first_op_q && result_queue_full)) begin
             // Do we have all the operands necessary for this instruction?
@@ -721,7 +722,7 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
     //////////////////////////////////
 
     alu_result_wdata_o = result_queue_q[result_queue_read_pnt_q].wdata;
-    if (alu_state_q == NO_REDUCTION || (alu_state_q == SIMD_REDUCTION && simd_red_cnt_q == simd_red_cnt_max_q)) begin
+    if (alu_state_q == NO_REDUCTION || first_op_q || (alu_state_q == SIMD_REDUCTION && simd_red_cnt_q == simd_red_cnt_max_q)) begin
       alu_result_req_o = result_queue_valid_q[result_queue_read_pnt_q] & ((alu_state_q == SIMD_REDUCTION) || !result_queue_q[result_queue_read_pnt_q].mask);
     end else begin
       alu_result_req_o = 1'b0;
