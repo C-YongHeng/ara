@@ -82,6 +82,7 @@ module vector_regfile import ara_pkg::*; #(
     tc_sram #(
       .NumWords (NumWords ),
       .DataWidth(DataWidth),
+      .SimInit  ("zeros"),
       .NumPorts (1        )
     ) data_sram (
       .clk_i  (vrf_clk                           ),
