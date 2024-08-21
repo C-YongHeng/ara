@@ -1400,6 +1400,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     // They are always encoded as ADDs with zero.
                     ara_req_d.op            = ara_pkg::VADD;
                     ara_req_d.use_scalar_op = 1'b1;
+                    skip_lmul_checks        = 1'b1;
                     ara_req_d.scalar_op     = '0;
 
                     case (insn.varith_type.rs1)
@@ -2761,7 +2762,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
             // Ara does not reshuffle source vregs upon vector stores,
             // thus the operand requesters will fetch Bytes referring
             // to the encoding of the source register
-            ara_req_d.scale_vl = 1'b1;
+            // ara_req_d.scale_vl = 1'b1;
 
             // These generate a request to Ara's backend
             ara_req_d.vs1       = insn.vmem_type.rd; // vs3 is encoded in the same position as rd
@@ -2776,7 +2777,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
             unique case ({insn.vmem_type.mew, insn.vmem_type.width})
               4'b0000: begin
                   if (insn.vmem_type.mop != 2'b01 && insn.vmem_type.mop != 2'b11) begin
-                    ara_req_d.vtype.vsew = EW8; // ara_req_d.vtype.vsew is the target EEW!
+                    ara_req_d.eew_vs1   = EW8; // This is the vs1 EEW
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
                     ara_req_d.eew_vs2    = EW8;
@@ -2784,7 +2785,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
               end
               4'b0101: begin
                   if (insn.vmem_type.mop != 2'b01 && insn.vmem_type.mop != 2'b11) begin
-                    ara_req_d.vtype.vsew = EW16;
+                    ara_req_d.eew_vs1   = EW16; // This is the vs1 EEW
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
                     ara_req_d.eew_vs2    = EW16;
@@ -2792,7 +2793,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
               end
               4'b0110: begin
                   if (insn.vmem_type.mop != 2'b01 && insn.vmem_type.mop != 2'b11) begin
-                    ara_req_d.vtype.vsew = EW32;
+                    ara_req_d.eew_vs1   = EW32; // This is the vs1 EEW
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
                     ara_req_d.eew_vs2    = EW32;
@@ -2800,7 +2801,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
               end
               4'b0111: begin
                   if (insn.vmem_type.mop != 2'b01 && insn.vmem_type.mop != 2'b11) begin
-                    ara_req_d.vtype.vsew = EW64;
+                    ara_req_d.eew_vs1   = EW64; // This is the vs1 EEW
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
                     ara_req_d.eew_vs2    = EW64;
