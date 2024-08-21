@@ -833,6 +833,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
               };
               axi_addrgen_queue_push = l1_dcache_gnt_i[0];
               tag_fifo_push          = l1_dcache_gnt_i[0];
+              load_is_inprocessing_o = 1'b1;
             end else begin
               axi_addrgen_queue_push = ~axi_addrgen_queue_full;
             end
