@@ -402,6 +402,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
 
   logic sldu_operand_opqueues_ready;
   logic sldu_addrgen_operand_opqueues_valid;
+  target_fu_e sldu_addrgen_operand_target_fu;
 
   // Cut stu_exception path
   logic stu_exception_flush;
@@ -446,7 +447,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .stu_exception_flush_i            (stu_exception_flush                ),
     // Address Generation Unit
     .sldu_addrgen_operand_o           (sldu_addrgen_operand_opqueues      ),
-    .sldu_addrgen_operand_target_fu_o (sldu_addrgen_operand_target_fu_o   ),
+    .sldu_addrgen_operand_target_fu_o (sldu_addrgen_operand_target_fu     ),
     .sldu_addrgen_operand_valid_o     (sldu_addrgen_operand_opqueues_valid),
     .sldu_operand_ready_i             (sldu_operand_opqueues_ready        ),
     .addrgen_operand_ready_i          (addrgen_operand_ready_i            ),
@@ -555,6 +556,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
                                        (sldu_mux_sel_q == ALU_RED ? alu_result_wdata : mfpu_result_wdata);
   assign sldu_addrgen_operand_valid_o = sldu_mux_sel_q == NO_RED ? sldu_addrgen_operand_opqueues_valid :
                                        (sldu_mux_sel_q == ALU_RED ? sldu_alu_req_valid_o : sldu_mfpu_req_valid_o);
+  assign sldu_addrgen_operand_target_fu_o = sldu_mux_sel_q == NO_RED ? sldu_addrgen_operand_target_fu : ALU_SLDU;
   assign sldu_operand_opqueues_ready  = sldu_operand_ready_i & (sldu_mux_sel_q == NO_RED);
   assign sldu_alu_gnt                 = sldu_operand_ready_i & (sldu_mux_sel_q == ALU_RED);
   assign sldu_mfpu_gnt                = sldu_operand_ready_i & (sldu_mux_sel_q == MFPU_RED);
