@@ -23,6 +23,24 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
   ) (
     input  logic                           clk_i,
     input  logic                           rst_ni,
+    `ifdef ARA_L1_INTF
+    // L1 interface
+    output dcache_req_i_t [1:0]            l1_dcache_req_o,
+    input  logic [1:0]                     l1_dcache_gnt_i,
+    input  logic                           l1_load_rvalid_i,
+    output logic                           load_is_inprocessing_o,
+    `ifdef ARA_VA
+    // Interface with TLB
+    output logic                           addrgen_trans_req_o,
+    output logic [riscv::VLEN-1:0]         addrgen_trans_vaddr_o,
+    output logic                           addrgen_trans_is_store_o,
+    input  logic                           addrgen_trans_dtlb_hit_i,
+    input  logic [riscv::PPNW-1:0]         addrgen_trans_dtlb_ppn_i,
+    input  logic                           addrgen_trans_valid_i,
+    input  logic [riscv::PLEN-1:0]         addrgen_trans_paddr_i,
+    input  exception_t                     addrgen_trans_exception_i,
+    `endif // ARA_VA
+    `else // ARA_L1_INTF
     // Memory interface
     output axi_ar_t                        axi_ar_o,
     output logic                           axi_ar_valid_o,
@@ -46,6 +64,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
     input  logic                           mmu_valid_i,      // translation is valid
     input  logic [riscv::PLEN-1:0]         mmu_paddr_i,      // translated address
     input  ariane_pkg::exception_t         mmu_exception_i,  // address translation threw an exception
+    `endif // ARA_L1_INTF
     // Interace with the dispatcher
     input  logic                           core_st_pending_i,
     // Interface with the main sequencer
@@ -178,8 +197,12 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
   //////////////////////////
   //  Address generation  //
   //////////////////////////
+  `ifdef ARA_L1_INTF
+  ariane_pkg::exception_t trans_exception_d, trans_exception_q;
+  `else
   ariane_pkg::exception_t mmu_exception_d, mmu_exception_q;
   logic last_translation_completed;
+  `endif
 
   // Running vector instructions
   logic [NrVInsn-1:0] vinsn_running_d, vinsn_running_q;
@@ -195,7 +218,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
     IDLE,
     ADDRGEN,
     ADDRGEN_IDX_OP,
-    ADDRGEN_IDX_OP_END,
+    ADDRGEN_END,
     WAIT_LAST_TRANSLATION
   } state_q, state_d;
 
@@ -315,6 +338,12 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
           };
           addrgen_req_valid = 1'b1;
 
+          `ifdef ARA_L1_INTF
+          if (addrgen_req_ready) begin : finished
+            addrgen_req_valid = '0;
+            state_d           = ADDRGEN_END;  // there is a critical path after adding a TLB, so return ack in next cycle
+          end
+          `else
           if (addrgen_req_ready) begin : finished
             addrgen_req_valid = '0;
             addrgen_ack_o     = 1'b1;
@@ -328,6 +357,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
             addrgen_ack_o     = 1'b0;
             state_d           = WAIT_LAST_TRANSLATION;
           end : translation_enabled
+          `endif
         end : address_valid
       end
 
@@ -432,13 +462,17 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
           end
         end
 
+        `ifdef ARA_L1_INTF
+        if (idx_op_error_d || addrgen_req_ready) begin
+        `else
         if (idx_op_error_d || addrgen_req_ready || mmu_exception_d.valid) begin
-          state_d = ADDRGEN_IDX_OP_END;
+        `endif
+          state_d = ADDRGEN_END;
         end
       end
 
       // This state exists not to create combinatorial paths on the interface
-      ADDRGEN_IDX_OP_END : begin
+      ADDRGEN_END : begin
         // Acknowledge the indexed memory operation
         addrgen_ack_o     = 1'b1;
         addrgen_req_valid = '0;
@@ -453,13 +487,21 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
           addrgen_exception_o.cause = riscv::ILLEGAL_INSTR;
           addrgen_exception_o.tval  = '0;
         end
+        `ifdef ARA_L1_INTF
+        if(trans_exception_q.valid) begin
+          addrgen_exception_o = trans_exception_q;
+        end
+        `else
         // Propagate the exception from the MMU (if any)
         // NOTE: this would override idx_op_error_q
         if (mmu_exception_q.valid) begin
           addrgen_exception_o = mmu_exception_q;
         end
+        `endif
       end
 
+      `ifdef ARA_L1_INTF
+      `else
       WAIT_LAST_TRANSLATION : begin
         if (last_translation_completed | mmu_exception_q.valid) begin
           // Acknowledge the indexed memory operation
@@ -473,6 +515,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
           addrgen_exception_o = mmu_exception_q;
         end
       end
+      `endif
     endcase
 
     // Immediately kill the load/store if the instruction was illegal
@@ -493,7 +536,11 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
       last_elm_subw_q    <= '0;
       idx_op_error_q     <= '0;
       addrgen_exception_vstart_o <= '0;
+      `ifdef ARA_L1_INTF
+      trans_exception_q  <= '0;
+      `else
       mmu_exception_q    <= '0;
+      `endif
     end else begin
       state_q            <= state_d;
       pe_req_q           <= pe_req_d;
@@ -504,7 +551,11 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
       last_elm_subw_q    <= last_elm_subw_d;
       idx_op_error_q     <= idx_op_error_d;
       addrgen_exception_vstart_o <= addrgen_exception_vstart_d;
+      `ifdef ARA_L1_INTF
+      trans_exception_q  <= trans_exception_d;
+      `else
       mmu_exception_q    <= mmu_exception_d;
+      `endif
     end
   end
 
@@ -552,9 +603,565 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
     AXI_ADDRGEN_AXI_DW_STORE_MISALIGNED,    // Misaligned vector store to AxiDataWidth/8, needs special treatement
     AXI_ADDRGEN_WAITING_CORE_STORE_PENDING, // Wait until (core_st_pending_i == 0)
     AXI_ADDRGEN_REQUESTING,                 // Perform AW/AR transactions and push addrgen_req to VSTU/VLDU
-    AXI_ADDRGEN_WAIT_TRANSLATION            // Wait for MMU to ack back
+    AXI_ADDRGEN_WAIT_TRANSLATION,           // Wait for MMU to ack back
+    AXI_ADDRGEN_EXCEPTION
   } axi_addrgen_state_d, axi_addrgen_state_q;
 
+
+
+`ifdef ARA_L1_INTF
+  parameter axi_pkg::size_t axi_data_size = $clog2(AxiDataWidth/8);
+
+  logic [2:0] burst_trans_len_d, burst_trans_len_q;
+  logic [DCACHE_TAG_WIDTH-1:0] tag_fifo_in, tag_fifo_out;
+  logic tag_fifo_empty, tag_fifo_full;
+  logic tag_fifo_push, tag_fifo_pop;
+  logic flush_fifo;
+  assign tag_fifo_pop = l1_load_rvalid_i;
+
+  // Load tag queue
+  fifo_v3 #(
+    .DEPTH( 2                               ),
+    .dtype( logic[DCACHE_TAG_WIDTH-1:0]     )
+  ) i_addrgen_tag_queue (
+    .clk_i     (clk_i                                                    ),
+    .rst_ni    (rst_ni                                                   ),
+    .flush_i   (1'b0                                                     ),
+    .testmode_i(1'b0                                                     ),
+    .data_i    (tag_fifo_in                                              ),
+    .push_i    (tag_fifo_push                                            ),
+    .full_o    (tag_fifo_full                                            ),
+    .data_o    (tag_fifo_out                                             ),
+    .pop_i     (tag_fifo_pop                                             ),
+    .empty_o   (tag_fifo_empty                                           ),
+    .usage_o   (/* Unused */                                             )
+  );
+
+`ifdef ARA_VA
+  logic paddr_fifo_push, paddr_fifo_pop;
+  logic paddr_fifo_empty, paddr_fifo_full;
+  logic [63:0] paddr_fifo_out, paddr_fifo_in;
+  logic [63:0] trans_cur_vaddr, trans_cur_vaddr_n;
+  logic [63:0] trans_end_vaddr, trans_end_vaddr_n;
+  vlen_t trans_counter, trans_counter_n;
+
+  // VA2PA queue
+  fifo_v3 #(
+    .DEPTH( 2               ),
+    .dtype( logic[63:0]     )
+  ) i_addrgen_paddr_queue (
+    .clk_i     (clk_i                                                    ),
+    .rst_ni    (rst_ni                                                   ),
+    .flush_i   (flush_fifo                                               ),
+    .testmode_i(1'b0                                                     ),
+    .data_i    (paddr_fifo_in                                            ),
+    .push_i    (paddr_fifo_push                                          ),
+    .full_o    (paddr_fifo_full                                          ),
+    .data_o    (paddr_fifo_out                                           ),
+    .pop_i     (paddr_fifo_pop                                           ),
+    .empty_o   (paddr_fifo_empty                                         ),
+    .usage_o   (/* Unused */                                             )
+  );
+`endif  // ifdef ARA_VA
+
+  always_comb begin: L1_addrgen
+    // Maintain state
+    axi_addrgen_state_d = axi_addrgen_state_q;
+    axi_addrgen_d       = axi_addrgen_q;
+
+    idx_vaddr_ready_d    = 1'b0;
+    addrgen_exception_vstart_d  = '0;
+
+    // No error by default
+    idx_op_error_d = 1'b0;
+    trans_exception_d = '0;
+
+    // No addrgen request to acknowledge
+    addrgen_req_ready = 1'b0;
+
+    // No addrgen command to the load/store units
+    axi_addrgen_queue      = '0;
+    axi_addrgen_queue_push = 1'b0;
+
+    tag_fifo_in = '0;
+    tag_fifo_push = 1'b0;
+
+    l1_dcache_req_o[0] = '0;
+    l1_dcache_req_o[1] = '0;
+    load_is_inprocessing_o = 1'b0;
+
+    burst_trans_len_d = burst_trans_len_q;
+
+  `ifdef ARA_VA
+    trans_cur_vaddr_n = trans_cur_vaddr;
+    trans_end_vaddr_n = trans_end_vaddr;
+    trans_counter_n = trans_counter;
+    paddr_fifo_push = 1'b0;
+    paddr_fifo_in = '0;
+    paddr_fifo_pop = 1'b0;
+    addrgen_trans_req_o = 1'b0;
+    addrgen_trans_vaddr_o = '0;
+    addrgen_trans_is_store_o = 1'b0;
+  `endif // ARA_VA
+    flush_fifo = 1'b0;
+
+    case (axi_addrgen_state_q)
+      AXI_ADDRGEN_IDLE: begin
+        if (addrgen_req_valid) begin
+          axi_addrgen_d       = addrgen_req;
+          axi_addrgen_state_d = core_st_pending_i ? AXI_ADDRGEN_WAITING_CORE_STORE_PENDING : AXI_ADDRGEN_REQUESTING;
+
+        `ifdef ARA_VA
+          trans_cur_vaddr_n = axi_addrgen_d.addr[63:0];
+          trans_end_vaddr_n = axi_addrgen_d.addr[63:0] + (axi_addrgen_d.len << int'(axi_addrgen_d.vew)) - 1;
+          trans_counter_n = 0;
+          // trans_counter_n = ((axi_addrgen_d.len << int'(axi_addrgen_d.vew)) >> 12) + 1;
+          if(!axi_addrgen_d.is_burst) begin // strided access and index access
+            trans_counter_n = axi_addrgen_d.len;
+            trans_end_vaddr_n = axi_addrgen_d.addr[63:0] + (1<<12);
+          end
+        `endif // ARA_VA
+        end
+      end
+
+      AXI_ADDRGEN_WAITING_CORE_STORE_PENDING: begin
+        if (!core_st_pending_i)
+          axi_addrgen_state_d = AXI_ADDRGEN_REQUESTING;
+      end
+
+      AXI_ADDRGEN_REQUESTING : begin
+        if (axi_addrgen_q.is_burst) begin
+
+          /////////////////////////
+          //  Unit-Stride access //
+          /////////////////////////
+
+        `ifdef ARA_VA
+          // access TLB
+          if(trans_cur_vaddr[63:12] <= trans_end_vaddr[63:12] && !paddr_fifo_full) begin
+            addrgen_trans_req_o = 1'b1;
+            addrgen_trans_vaddr_o = {trans_cur_vaddr[63:12], 12'b0};
+            addrgen_trans_is_store_o = ~axi_addrgen_q.is_load;
+
+            if(addrgen_trans_dtlb_hit_i) begin
+              paddr_fifo_push = 1'b1;  // push the physical address to fifo
+              paddr_fifo_in = {addrgen_trans_dtlb_ppn_i, 12'b0};
+              trans_cur_vaddr_n = trans_cur_vaddr + (1<<12);
+              if(trans_cur_vaddr[63:12] == trans_end_vaddr[63:12]) begin
+                // last virtual page translation complete, response ready
+                addrgen_req_ready   = 1'b1; 
+              end
+            end
+          end
+        `endif // ARA_VA
+
+          // access L1 Dcache
+          `ifdef ARA_VA
+          if(!paddr_fifo_empty && !addrgen_trans_exception_i.valid)
+          `endif
+          begin
+            if (axi_addrgen_q.is_load) begin
+              l1_dcache_req_o[0] = '{
+                address_index: axi_addrgen_q.addr[DCACHE_INDEX_WIDTH-1:0],  // DCACHE_INDEX_WIDTH must less than 12!!!
+                data_req: (~axi_addrgen_queue_full & ~tag_fifo_full),
+                data_size: 2'b11, // just for access non-cacheable region, max 64 bits
+                default: '0
+              };
+              axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+              tag_fifo_push          = l1_dcache_gnt_i[0];
+              load_is_inprocessing_o = 1'b1;
+            end else begin
+              axi_addrgen_queue_push = ~axi_addrgen_queue_full;
+            end
+
+            `ifdef ARA_VA
+            // Send this request to the load/store units
+            axi_addrgen_queue = '{
+              addr            : {paddr_fifo_out[63:12], axi_addrgen_q.addr[11:0]}, //physical address
+              len             : 0,
+              size            : axi_data_size,
+              is_load         : axi_addrgen_q.is_load,
+              is_exception    : 1'b0 
+            };
+            `else // ARA_VA
+            // Send this request to the load/store units
+            axi_addrgen_queue = '{
+              addr            : axi_addrgen_q.addr, //physical address
+              len             : 0,
+              size            : axi_data_size,
+              is_load         : axi_addrgen_q.is_load,
+              is_exception    : 1'b0
+            };
+            `endif // ARA_VA
+            tag_fifo_in = axi_addrgen_queue.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
+
+            // calculate vector length
+            if(axi_addrgen_queue_push) begin
+              if(axi_addrgen_q.vew >= $clog2(AxiDataWidth/8)) begin
+                burst_trans_len_d = burst_trans_len_q + $clog2(AxiDataWidth/8);
+                if(burst_trans_len_d >= axi_addrgen_q.vew) begin
+                  axi_addrgen_d.len = axi_addrgen_q.len - 1;
+                  burst_trans_len_d = 3'b000;
+                end
+              end else begin
+                if(axi_addrgen_q.len < (((AxiDataWidth/8) - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]) >> int'(axi_addrgen_q.vew))) begin
+                  axi_addrgen_d.len = 0;
+                end else begin
+                  axi_addrgen_d.len = axi_addrgen_q.len - (((AxiDataWidth/8) - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]) >> int'(axi_addrgen_q.vew));
+                end
+              end
+
+              // next access address
+              axi_addrgen_d.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] = axi_addrgen_q.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] + 1;
+              axi_addrgen_d.addr[$clog2(AxiDataWidth/8)-1:0] = '0;
+
+              `ifdef ARA_VA
+              if(axi_addrgen_d.addr[63:12] != axi_addrgen_q.addr[63:12]) begin  // next page, pop the ppn
+                paddr_fifo_pop = 1'b1;
+              end
+              `endif
+            end
+          end
+
+          `ifdef ARA_VA
+          // Finished generating Cache requests
+          if (axi_addrgen_d.len == 0) begin
+            paddr_fifo_pop = 1'b1;  // pop the last ppn
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+          end
+
+          `else //ARA_VA
+          // first data has been handled, so we can return ready
+          if (axi_addrgen_q.len == addrgen_req.len && burst_trans_len_q == 0 && axi_addrgen_queue_push) begin
+            addrgen_req_ready   = 1'b1;
+          end
+          // Finished generating AXI requests
+          if (axi_addrgen_d.len == 0) begin
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+          end
+          `endif // ARA_VA
+
+        end else if (state_q != ADDRGEN_IDX_OP) begin
+
+          /////////////////////
+          //  Strided access //
+          /////////////////////
+          `ifdef ARA_VA
+          // access TLB
+          if(trans_counter != 0 && !paddr_fifo_full) begin
+            addrgen_trans_req_o = 1'b1;
+            addrgen_trans_vaddr_o = {trans_cur_vaddr[63:12], 12'b0};
+            addrgen_trans_is_store_o = ~axi_addrgen_q.is_load;
+
+            if(addrgen_trans_dtlb_hit_i) begin
+              paddr_fifo_push = trans_cur_vaddr[63:12] != trans_end_vaddr[63:12];  // if this vpn is not equal last vpn, then push the physical address to fifo
+              paddr_fifo_in = {addrgen_trans_dtlb_ppn_i, 12'b0};
+              trans_cur_vaddr_n = trans_cur_vaddr + axi_addrgen_q.stride[63:0];
+              trans_end_vaddr_n = trans_cur_vaddr;  // now trans_end_vaddr save the last trans_vaddr
+              trans_counter_n = trans_counter - 1;
+              if(trans_counter == 1) begin
+                // last virtual page translation complete, response ready
+                addrgen_req_ready   = 1'b1; 
+              end
+            end
+          end
+          `endif // ARA_VA
+
+          // access L1 Dcache
+          `ifdef ARA_VA
+          if(!paddr_fifo_empty && !addrgen_trans_exception_i.valid)
+          `endif
+          begin
+            if (axi_addrgen_q.is_load) begin
+              l1_dcache_req_o[0] = '{
+                address_index: axi_addrgen_q.addr[DCACHE_INDEX_WIDTH-1:0],
+                data_req: (~axi_addrgen_queue_full & ~tag_fifo_full),
+                data_size: axi_addrgen_q.vew[1:0], // L1 D$ size just 2 bits
+                default: '0
+              };
+              axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+              tag_fifo_push          = l1_dcache_gnt_i[0];
+              load_is_inprocessing_o = 1'b1;
+            end else begin
+              axi_addrgen_queue_push = ~axi_addrgen_queue_full;
+            end
+
+            `ifdef ARA_VA
+            // Send this request to the load/store units
+            axi_addrgen_queue = '{
+              addr            : {paddr_fifo_out[63:12], axi_addrgen_q.addr[11:0]}, //physical address
+              size            : axi_addrgen_q.vew,
+              len             : 0,
+              is_load         : axi_addrgen_q.is_load,
+              is_exception    : 1'b0
+            };
+            `else // ARA_VA
+            // Send this request to the load/store units
+            axi_addrgen_queue = '{
+              addr            : axi_addrgen_q.addr,
+              size            : axi_addrgen_q.vew,
+              len             : 0,
+              is_load         : axi_addrgen_q.is_load,
+              is_exception    : 1'b0
+            };
+            `endif // ARA_VA
+            tag_fifo_in = axi_addrgen_queue.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
+
+            if(axi_addrgen_queue_push) begin
+              // Account for the requested operands
+              axi_addrgen_d.len  = axi_addrgen_q.len - 1;
+              // Calculate the addresses for the next iteration, adding the correct stride
+              axi_addrgen_d.addr = axi_addrgen_q.addr + axi_addrgen_q.stride;
+            `ifdef ARA_VA
+              if(axi_addrgen_d.addr[63:12] != axi_addrgen_q.addr[63:12]) begin  // next page, pop the ppn
+                paddr_fifo_pop = 1'b1;
+              end
+            `endif
+            end
+          end
+
+          `ifdef ARA_VA
+          // Finished generating AXI requests
+          if (axi_addrgen_d.len == 0) begin
+            paddr_fifo_pop = 1'b1;  // pop the last ppn
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+          end
+
+          `else // ARA_VA
+          // first data has been handled, so we can return ready
+          if (axi_addrgen_q.len == addrgen_req.len && axi_addrgen_queue_push) begin
+            addrgen_req_ready   = 1'b1;
+          end
+          // Finished generating AXI requests
+          if (axi_addrgen_d.len == 0) begin
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+          end
+          `endif // ARA_VA
+
+        end else begin
+
+          //////////////////////
+          //  Indexed access  //
+          //////////////////////
+
+          `ifdef ARA_VA
+          // access TLB
+          if (trans_counter != 0 && idx_vaddr_valid_q && !paddr_fifo_full) begin
+            addrgen_trans_req_o = 1'b1;
+            addrgen_trans_vaddr_o = idx_final_vaddr_q;
+            addrgen_trans_is_store_o = ~axi_addrgen_q.is_load;
+
+            if(addrgen_trans_dtlb_hit_i) begin
+              // We consumed a word
+              idx_vaddr_ready_d = 1'b1;
+              paddr_fifo_push = 1'b1;
+              paddr_fifo_in = {addrgen_trans_dtlb_ppn_i, idx_final_vaddr_q[11:0]};
+              trans_counter_n = trans_counter - 1;
+              if(trans_counter == 1) begin
+                // last virtual page translation complete, response ready
+                addrgen_req_ready   = 1'b1; 
+              end
+            end
+          end
+
+          // access Dcache
+          if(!paddr_fifo_empty && !addrgen_trans_exception_i.valid) begin
+            if (axi_addrgen_q.is_load) begin
+              l1_dcache_req_o[0] = '{
+                address_index: paddr_fifo_out[DCACHE_INDEX_WIDTH-1:0],
+                data_req: (~axi_addrgen_queue_full & ~tag_fifo_full),
+                data_size: axi_addrgen_q.vew[1:0], // L1 D$ size just 2 bits
+                default: '0
+              };
+              axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+              tag_fifo_push          = l1_dcache_gnt_i[0];
+              load_is_inprocessing_o = 1'b1;
+            end else begin
+              axi_addrgen_queue_push = ~axi_addrgen_queue_full;
+            end
+
+            // Send this request to the load/store units
+            axi_addrgen_queue = '{
+              addr            : paddr_fifo_out,
+              size            : axi_addrgen_q.vew,
+              len             : 0,
+              is_load         : axi_addrgen_q.is_load,
+              is_exception    : 1'b0
+            };
+            tag_fifo_in = axi_addrgen_queue.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
+
+            // Account for the requested operands
+            if(axi_addrgen_queue_push) begin
+              axi_addrgen_d.len = axi_addrgen_q.len - 1;
+              paddr_fifo_pop = 1'b1;
+            end
+          end
+
+          // Check if the address does generate an exception
+          if (idx_vaddr_valid_q && is_addr_error(idx_final_vaddr_q, axi_addrgen_q.vew)) begin
+            // Generate an error
+            idx_op_error_d          = 1'b1;
+            // Forward next vstart info to the dispatcher
+            addrgen_exception_vstart_d = addrgen_req.len - axi_addrgen_q.len - 1;
+            addrgen_req_ready       = 1'b1;
+            if(!axi_addrgen_queue_full) begin
+              axi_addrgen_queue = '{
+                addr            : '0,
+                size            : '0,
+                len             : '0,
+                is_load         : axi_addrgen_q.is_load,
+                is_exception    : 1'b1
+              };
+              axi_addrgen_queue_push = 1'b1;
+            end
+            axi_addrgen_state_d = axi_addrgen_queue_full? AXI_ADDRGEN_EXCEPTION : AXI_ADDRGEN_IDLE;
+          end
+
+          // Finished generating AXI requests
+          if (axi_addrgen_d.len == 0) begin
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+          end
+
+          `else // ARA_VA
+          if (idx_vaddr_valid_q && !is_addr_error(idx_final_vaddr_q, axi_addrgen_q.vew)) begin
+            if (axi_addrgen_q.is_load) begin
+              l1_dcache_req_o[0] = '{
+                address_index: idx_final_vaddr_q[DCACHE_INDEX_WIDTH-1:0],
+                data_req: (~axi_addrgen_queue_full & ~tag_fifo_full),
+                data_size: axi_addrgen_q.vew[1:0], // L1 D$ size just 2 bits
+                default: '0
+              };
+              axi_addrgen_queue_push = l1_dcache_gnt_i[0];
+              tag_fifo_push          = l1_dcache_gnt_i[0];
+            end else begin
+              axi_addrgen_queue_push = ~axi_addrgen_queue_full;
+            end
+
+            // We consumed a word
+            idx_vaddr_ready_d = axi_addrgen_queue_push;
+
+            // Send this request to the load/store units
+            axi_addrgen_queue = '{
+              addr            : idx_final_vaddr_q,
+              size            : axi_addrgen_q.vew,
+              len             : 0,
+              is_load         : axi_addrgen_q.is_load,
+              is_exception    : 1'b0
+            };
+            tag_fifo_in = axi_addrgen_queue.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
+
+            // Account for the requested operands
+            if(axi_addrgen_queue_push) begin
+              axi_addrgen_d.len = axi_addrgen_q.len - 1;
+            end
+          end
+
+          // Check if the address does generate an exception
+          if (idx_vaddr_valid_q && is_addr_error(idx_final_vaddr_q, axi_addrgen_q.vew)) begin
+            // Generate an error
+            idx_op_error_d          = 1'b1;
+            // Forward next vstart info to the dispatcher
+            addrgen_exception_vstart_d = addrgen_req.len - axi_addrgen_q.len - 1;
+            addrgen_req_ready       = 1'b1;
+            if(!axi_addrgen_queue_full) begin
+              axi_addrgen_queue = '{
+                addr            : '0,
+                size            : '0,
+                len             : '0,
+                is_load         : axi_addrgen_q.is_load,
+                is_exception    : 1'b1
+              };
+              axi_addrgen_queue_push = 1'b1;
+            end
+            axi_addrgen_state_d = axi_addrgen_queue_full? AXI_ADDRGEN_EXCEPTION : AXI_ADDRGEN_IDLE;
+          end
+
+          // Finished generating AXI requests
+          if (axi_addrgen_d.len == 0) begin
+            addrgen_req_ready   = 1'b1;
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+          end
+          `endif // ARA_VA
+        end
+
+        `ifdef ARA_VA
+        // TLB raise a exception, kill this access
+        if(addrgen_trans_exception_i.valid) begin
+          addrgen_req_ready = 1'b1;
+          if(!axi_addrgen_queue_full) begin
+            axi_addrgen_queue = '{
+              addr            : '0,
+              size            : '0,
+              len             : '0,
+              is_load         : axi_addrgen_q.is_load,
+              is_exception    : 1'b1
+            };
+            axi_addrgen_queue_push = 1'b1;
+          end
+          axi_addrgen_state_d = axi_addrgen_queue_full? AXI_ADDRGEN_EXCEPTION : AXI_ADDRGEN_IDLE;
+          trans_exception_d = addrgen_trans_exception_i;
+          addrgen_exception_vstart_d  = pe_req_q.vl - axi_addrgen_q.len;
+          flush_fifo = 1'b1;
+        end
+        `endif
+      end
+      AXI_ADDRGEN_EXCEPTION: begin
+        // when raise a exception, we need a addrgen request to load/store unit to finish this instruction
+        if(!axi_addrgen_queue_full) begin
+          axi_addrgen_queue = '{
+            addr            : '0,
+            size            : '0,
+            len             : '0,
+            is_load         : axi_addrgen_q.is_load,
+            is_exception    : 1'b1
+          };
+          axi_addrgen_queue_push = 1'b1;
+          axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+        end
+      end
+    endcase
+
+    if(!axi_addrgen_queue_empty && !axi_addrgen_req_o.is_load) begin
+      l1_dcache_req_o[1] = '{
+        address_index: axi_addrgen_req_o.addr[DCACHE_INDEX_WIDTH-1:0],
+        address_tag: axi_addrgen_req_o.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH],
+        data_size: axi_addrgen_req_o.size[1:0],
+        default: '0
+      };
+    end
+
+    // send load tag to D$
+    if(!tag_fifo_empty) begin
+      l1_dcache_req_o[0].tag_valid = 1'b1;
+      l1_dcache_req_o[0].address_tag = tag_fifo_out;
+    end
+  end: L1_addrgen
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      axi_addrgen_state_q  <= AXI_ADDRGEN_IDLE;
+      axi_addrgen_q        <= '0;
+      burst_trans_len_q    <= '0;
+
+    `ifdef ARA_VA
+      trans_cur_vaddr      <= '0;
+      trans_end_vaddr      <= '0;
+      trans_counter        <= '0;
+    `endif
+    end else begin
+      axi_addrgen_state_q  <= axi_addrgen_state_d;
+      axi_addrgen_q        <= axi_addrgen_d;
+      burst_trans_len_q    <= burst_trans_len_d;
+
+    `ifdef ARA_VA
+      trans_cur_vaddr      <= trans_cur_vaddr_n;
+      trans_end_vaddr      <= trans_end_vaddr_n;
+      trans_counter        <= trans_counter_n;
+    `endif
+    end
+  end
+
+`else // ARA_L1_INTF
   axi_addr_t aligned_start_addr_d, aligned_start_addr_q;
   axi_addr_t aligned_next_start_addr_d, aligned_next_start_addr_q;
   axi_addr_t aligned_end_addr_d, aligned_end_addr_q;
@@ -1014,5 +1621,6 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
       next_2page_msb_q          <= next_2page_msb_d;
     end
   end
+`endif // ARA_L1_INTF
 
 endmodule : addrgen

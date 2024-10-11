@@ -294,12 +294,17 @@ package ara_pkg;
   /////////////////////////////
 
   // Use Ariane's accelerator interface.
+  `ifdef ARA_L1_INTF
+  typedef ariane_pkg::accelerator_req_t accelerator_req_t;
+  typedef ariane_pkg::accelerator_resp_t accelerator_resp_t;
+  `else
   typedef acc_pkg::cva6_to_acc_t cva6_to_acc_t;
   typedef acc_pkg::acc_to_cva6_t acc_to_cva6_t;
   typedef acc_pkg::accelerator_req_t accelerator_req_t;
   typedef acc_pkg::accelerator_resp_t accelerator_resp_t;
   typedef acc_pkg::acc_mmu_req_t acc_mmu_req_t;
   typedef acc_pkg::acc_mmu_resp_t acc_mmu_resp_t;
+  `endif
 
   ////////////////////
   //  PE interface  //

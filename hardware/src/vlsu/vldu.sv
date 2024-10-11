@@ -25,10 +25,17 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
   ) (
     input  logic                           clk_i,
     input  logic                           rst_ni,
+    `ifdef ARA_L1_INTF
+    // D$ interface
+    input  logic [AxiDataWidth-1:0]        dcache_rdata_i,
+    input  logic                           dcache_rvalid_i,
+    output logic                           dcache_rready_o,
+    `else // ARA_L1_INTF
     // Memory interface
     input  axi_r_t                         axi_r_i,
     input  logic                           axi_r_valid_i,
     output logic                           axi_r_ready_o,
+    `endif // ARA_L1_INTF
     // Interface with dispatcher
     output logic                           load_complete_o,
     // Interface with the main sequencer
@@ -242,7 +249,11 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
     // We are not ready, by default
     axi_addrgen_req_ready_o = 1'b0;
     pe_resp_d               = '0;
+    `ifdef ARA_L1_INTF
+    dcache_rready_o         = 1'b0;
+    `else
     axi_r_ready_o           = 1'b0;
+    `endif
     mask_ready_o            = 1'b0;
     load_complete_o         = 1'b0;
 
@@ -258,6 +269,16 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
     // - The Address Generator sent us the data about the corresponding AR beat
     // - There is place in the result queue to write the data read from the R channel
     // - This request did not generate an exception
+    `ifdef ARA_L1_INTF
+    if (dcache_rvalid_i && axi_addrgen_req_valid_i
+        && axi_addrgen_req_i.is_load && !axi_addrgen_req_i.is_exception
+        && !result_queue_full) begin : axi_r_beat_read
+      // One request only gets a AxiDataWidth-data from L1 Cache
+      // So we can get valid bytes from offset
+      automatic shortint unsigned lower_byte = axi_addrgen_req_i.addr[$clog2(AxiDataWidth/8)-1:0];
+      automatic shortint unsigned upper_byte = axi_addrgen_req_i.addr[$clog2(AxiDataWidth/8)-1:0] + (1 << axi_addrgen_req_i.size) - 1;
+
+    `else
     if (axi_r_valid_i && axi_addrgen_req_valid_i
         && axi_addrgen_req_i.is_load && !axi_addrgen_req_i.is_exception
         && !result_queue_full) begin : axi_r_beat_read
@@ -267,6 +288,7 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
         axi_addrgen_req_i.size, axi_addrgen_req_i.len, BURST_INCR, AxiDataWidth/8, axi_len_q);
       automatic shortint unsigned upper_byte = beat_upper_byte(axi_addrgen_req_i.addr,
         axi_addrgen_req_i.size, axi_addrgen_req_i.len, BURST_INCR, AxiDataWidth/8, axi_len_q);
+    `endif
 
       // Is there a vector instruction ready to be issued?
       // Do we have the operands for it?
@@ -311,8 +333,13 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
               automatic int unsigned vrf_lane = (vrf_byte >> 3);
 
               // Copy data and byte strobe
+              `ifdef ARA_L1_INTF
+              result_queue_d[result_queue_write_pnt_q][vrf_lane].wdata[8*vrf_offset +: 8] =
+                dcache_rdata_i[8*axi_byte +: 8];
+              `else
               result_queue_d[result_queue_write_pnt_q][vrf_lane].wdata[8*vrf_offset +: 8] =
                 axi_r_i.data[8*axi_byte +: 8];
+              `endif
               result_queue_d[result_queue_write_pnt_q][vrf_lane].be[vrf_offset] =
                 vinsn_issue_q.vm || mask_i[vrf_lane][vrf_offset];
             end : is_vrf_byte
@@ -370,8 +397,12 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
 
       // Consumed all valid bytes in this R beat
       if ((axi_r_byte_pnt_d == (upper_byte - lower_byte + 1)) || (issue_cnt_bytes_d == '0)) begin : axi_r_beat_finish
+        `ifdef ARA_L1_INTF
+        dcache_rready_o = 1'b1;
+        `else
         // Request another beat
         axi_r_ready_o = 1'b1;
+        `endif
         axi_r_byte_pnt_d   = '0;
         // Account for the beat we consumed
         axi_len_d     = axi_len_q + 1;

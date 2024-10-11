@@ -31,9 +31,27 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
   ) (
     input  logic                    clk_i,
     input  logic                    rst_ni,
+    `ifdef ARA_L1_INTF
+    // L1 D$ interface
+    output dcache_req_i_t [1:0]     l1_dcache_req_o,
+    input  dcache_req_o_t [1:0]     l1_dcache_resp_i,
+    output logic                    load_is_inprocessing_o,
+    `ifdef ARA_VA
+    // Interface with TLB
+    output logic                    addrgen_trans_req_o,
+    output logic [riscv::VLEN-1:0]  addrgen_trans_vaddr_o,
+    output logic                    addrgen_trans_is_store_o,
+    input  logic                    addrgen_trans_dtlb_hit_i,
+    input  logic [riscv::PPNW-1:0]  addrgen_trans_dtlb_ppn_i,
+    input  logic                    addrgen_trans_valid_i,
+    input  logic [riscv::PLEN-1:0]  addrgen_trans_paddr_i,
+    input  exception_t              addrgen_trans_exception_i,
+    `endif // ARA_VA
+    `else // ARA_L1_INTF
     // AXI Memory Interface
     output axi_req_t                axi_req_o,
     input  axi_resp_t               axi_resp_i,
+    `endif // ARA_L1_INTF
     // Interface with the dispatcher
     input  logic                    core_st_pending_i,
     output logic                    load_complete_o,
@@ -65,6 +83,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     output logic                    vldu_mask_ready_o,
     output logic                    vstu_mask_ready_o,
 
+    `ifndef ARA_L1_INTF
     // CSR input
     input  logic                    en_ld_st_translation_i,
 
@@ -82,6 +101,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     input logic                            mmu_valid_i,      // translation is valid
     input logic [riscv::PLEN-1:0]          mmu_paddr_i,      // translated address
     input ariane_pkg::exception_t          mmu_exception_i,  // address translation threw an exception
+    `endif // ARA_L1_INTF
 
     // Results
     output logic      [NrLanes-1:0] ldu_result_req_o,
@@ -104,6 +124,58 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
 
   typedef logic [AxiAddrWidth-1:0] axi_addr_t;
 
+  `ifdef ARA_L1_INTF
+  dcache_req_i_t [1:0] l1_dcache_req_addrgen;
+  logic [AxiDataWidth-1:0] dcache_wdata;
+  logic [AxiDataWidth/8-1:0] dcache_wbe;
+  logic dcache_wvalid;
+  logic [AxiDataWidth-1:0] dcache_rdata;
+  logic dcache_rvalid, dcache_rready;
+
+  logic load_data_fifo_full, load_data_fifo_empty;
+
+  // read port
+  assign l1_dcache_req_o[0].address_index = l1_dcache_req_addrgen[0].address_index;
+  assign l1_dcache_req_o[0].address_tag = l1_dcache_req_addrgen[0].address_tag;
+  assign l1_dcache_req_o[0].data_req = l1_dcache_req_addrgen[0].data_req;
+  assign l1_dcache_req_o[0].data_size = l1_dcache_req_addrgen[0].data_size;
+  assign l1_dcache_req_o[0].tag_valid = l1_dcache_req_addrgen[0].tag_valid & ~load_data_fifo_full;
+  assign l1_dcache_req_o[0].data_wdata = 'b0;
+  assign l1_dcache_req_o[0].data_we= 1'b0;
+  assign l1_dcache_req_o[0].data_be = 'b0;
+  assign l1_dcache_req_o[0].kill_req = 1'b0;
+
+  // store port
+  assign l1_dcache_req_o[1].address_index = l1_dcache_req_addrgen[1].address_index;
+  assign l1_dcache_req_o[1].address_tag = l1_dcache_req_addrgen[1].address_tag;
+  assign l1_dcache_req_o[1].data_req = dcache_wvalid;    
+  assign l1_dcache_req_o[1].data_size = l1_dcache_req_addrgen[1].data_size;
+  assign l1_dcache_req_o[1].tag_valid = dcache_wvalid;
+  assign l1_dcache_req_o[1].data_wdata = dcache_wdata;
+  assign l1_dcache_req_o[1].data_we= 1'b1;
+  assign l1_dcache_req_o[1].data_be = dcache_wbe;
+  assign l1_dcache_req_o[1].kill_req = 1'b0;
+
+  // Load data queue
+  fifo_v3 #(
+    .DEPTH( 2                           ),
+    .dtype( logic[AxiDataWidth-1:0]     )
+  ) i_load_data_queue (
+    .clk_i     (clk_i                                                    ),
+    .rst_ni    (rst_ni                                                   ),
+    .flush_i   (1'b0                                                     ),
+    .testmode_i(1'b0                                                     ),
+    .data_i    (l1_dcache_resp_i[0].data_rdata                           ),
+    .push_i    (l1_dcache_resp_i[0].data_rvalid                          ),
+    .full_o    (load_data_fifo_full                                      ),
+    .data_o    (dcache_rdata                                             ),
+    .pop_i     (dcache_rready                                            ),
+    .empty_o   (load_data_fifo_empty                                     ),
+    .usage_o   (/* Unused */                                             )
+  );
+  assign dcache_rvalid = ~load_data_fifo_empty;
+
+  `else // ARA_L1_INTF
   ///////////////
   //  AXI Cut  //
   ///////////////
@@ -128,6 +200,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     .slv_req_i (axi_req   ),
     .slv_resp_o(axi_resp  )
   );
+  `endif // ARA_L1_INTF
 
   //////////////////////////
   //  Address Generation  //
@@ -151,6 +224,22 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
   ) i_addrgen (
     .clk_i                      (clk_i                      ),
     .rst_ni                     (rst_ni                     ),
+    `ifdef ARA_L1_INTF
+    .l1_dcache_req_o            (l1_dcache_req_addrgen      ),
+    .l1_dcache_gnt_i            ({l1_dcache_resp_i[1].data_gnt, l1_dcache_resp_i[0].data_gnt}),
+    .l1_load_rvalid_i           (l1_dcache_resp_i[0].data_rvalid),
+    .load_is_inprocessing_o     (load_is_inprocessing_o     ),
+    `ifdef ARA_VA
+    .addrgen_trans_req_o        (addrgen_trans_req_o        ),
+    .addrgen_trans_vaddr_o      (addrgen_trans_vaddr_o      ),
+    .addrgen_trans_is_store_o   (addrgen_trans_is_store_o   ),
+    .addrgen_trans_dtlb_hit_i   (addrgen_trans_dtlb_hit_i   ),
+    .addrgen_trans_dtlb_ppn_i   (addrgen_trans_dtlb_ppn_i   ),
+    .addrgen_trans_valid_i      (addrgen_trans_valid_i      ),
+    .addrgen_trans_paddr_i      (addrgen_trans_paddr_i      ),
+    .addrgen_trans_exception_i  (addrgen_trans_exception_i  ),
+    `endif
+    `else // ARA_L1_INTF
     // AXI Memory Interface
     .axi_aw_o                   (axi_req.aw                 ),
     .axi_aw_valid_o             (axi_req.aw_valid           ),
@@ -158,6 +247,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     .axi_ar_o                   (axi_req.ar                 ),
     .axi_ar_valid_o             (axi_req.ar_valid           ),
     .axi_ar_ready_i             (axi_resp.ar_ready          ),
+    `endif // ARA_L1_INTF
     // Interface with dispatcher
     .core_st_pending_i          (core_st_pending_i          ),
     // Interface with the sequencer
@@ -178,8 +268,10 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     .axi_addrgen_req_o          (axi_addrgen_req            ),
     .axi_addrgen_req_valid_o    (axi_addrgen_req_valid      ),
     .ldu_axi_addrgen_req_ready_i(ldu_axi_addrgen_req_ready  ),
-    .stu_axi_addrgen_req_ready_i(stu_axi_addrgen_req_ready  ),
-
+    .stu_axi_addrgen_req_ready_i(stu_axi_addrgen_req_ready  )
+    `ifdef ARA_L1_INTF
+    `else // ARA_L1_INTF
+    ,
     // CSR input
     .en_ld_st_translation_i,
     .mmu_misaligned_ex_o,
@@ -191,6 +283,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     .mmu_valid_i,
     .mmu_paddr_i,
     .mmu_exception_i
+    `endif // ARA_L1_INTF
   );
 
   ////////////////////////
@@ -209,10 +302,16 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
   ) i_vldu (
     .clk_i                  (clk_i                     ),
     .rst_ni                 (rst_ni                    ),
+    `ifdef ARA_L1_INTF
+    .dcache_rdata_i         (dcache_rdata              ),
+    .dcache_rvalid_i        (dcache_rvalid             ),
+    .dcache_rready_o        (dcache_rready             ),
+    `else // ARA_L1_INTF
     // AXI Memory Interface
     .axi_r_i                (axi_resp.r                ),
     .axi_r_valid_i          (axi_resp.r_valid          ),
     .axi_r_ready_o          (axi_req.r_ready           ),
+    `endif // ARA_L1_INTF
     // Interface with the dispatcher
     .load_complete_o        (load_complete             ),
     // Interface with the main sequencer
@@ -257,6 +356,12 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
   ) i_vstu (
     .clk_i                  (clk_i                      ),
     .rst_ni                 (rst_ni                     ),
+    `ifdef ARA_L1_INTF
+    .dcache_wdata_o         (dcache_wdata               ),
+    .dcache_wbe_o           (dcache_wbe                 ),
+    .dcache_wvalid_o        (dcache_wvalid              ),
+    .dcache_wgnt_i          (l1_dcache_resp_i[1].data_gnt),
+    `else // ARA_L1_INTF
     // AXI Memory Interface
     .axi_w_o                (axi_req.w                  ),
     .axi_w_valid_o          (axi_req.w_valid            ),
@@ -264,6 +369,7 @@ module vlsu import ara_pkg::*; import rvv_pkg::*; #(
     .axi_b_i                (axi_resp.b                 ),
     .axi_b_valid_i          (axi_resp.b_valid           ),
     .axi_b_ready_o          (axi_req.b_ready            ),
+    `endif
     // Interface with the dispatcher
     .store_pending_o        (store_pending_o            ),
     .store_complete_o       (store_complete             ),

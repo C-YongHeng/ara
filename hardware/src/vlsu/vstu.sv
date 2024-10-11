@@ -32,6 +32,13 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
   )(
     input  logic                           clk_i,
     input  logic                           rst_ni,
+    `ifdef ARA_L1_INTF
+    // D$ interface
+    output logic [AxiDataWidth-1:0]        dcache_wdata_o,
+    output logic [AxiDataWidth/8-1:0]      dcache_wbe_o,
+    output logic                           dcache_wvalid_o,
+    input  logic                           dcache_wgnt_i,
+    `else
     // Memory interface
     output axi_w_t                         axi_w_o,
     output logic                           axi_w_valid_o,
@@ -39,6 +46,7 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
     input  axi_b_t                         axi_b_i,
     input  logic                           axi_b_valid_i,
     output logic                           axi_b_ready_o,
+    `endif
     // Interface with the dispatcher
     output logic                           store_pending_o,
     output logic                           store_complete_o,
@@ -235,9 +243,15 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
     // We are not ready, by default
     axi_addrgen_req_ready_o = 1'b0;
     pe_resp_d               = '0;
+    `ifdef ARA_L1_INTF
+    dcache_wdata_o          = '0;
+    dcache_wbe_o            = '0;
+    dcache_wvalid_o         = 1'b0;
+    `else // ARA_L1_INTF
     axi_w_o                 = '0;
     axi_w_valid_o           = 1'b0;
     axi_b_ready_o           = 1'b0;
+    `endif // ARA_L1_INTF
     stu_operand_ready       = 1'b0;
     mask_ready_o            = 1'b0;
     store_complete_o        = 1'b0;
@@ -266,9 +280,15 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
     // - The address generator generated an AXI AW request for this write beat
     // - The AXI subsystem is ready to accept this W beat
     // - The current addrgen request has not generated an exception
+    `ifdef ARA_L1_INTF
+    if (vinsn_issue_valid &&
+        axi_addrgen_req_valid_i && !axi_addrgen_req_i.is_load
+     && !axi_addrgen_req_i.is_exception) begin : issue_valid
+    `else
     if (vinsn_issue_valid &&
         axi_addrgen_req_valid_i && !axi_addrgen_req_i.is_load
      && !axi_addrgen_req_i.is_exception && axi_w_ready_i) begin : issue_valid
+    `endif
       // Bytes valid in the current W beat
       automatic shortint unsigned lower_byte = beat_lower_byte(axi_addrgen_req_i.addr,
         axi_addrgen_req_i.size, axi_addrgen_req_i.len, BURST_INCR, AxiDataWidth/8, axi_len_q);
@@ -298,8 +318,15 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
 
       // Wait for all expected operands from the lanes
       if (&stu_operand_valid && (vinsn_issue_q.vm || (|mask_valid_i))) begin : operands_ready
+        `ifdef ARA_L1_INTF
+        if(dcache_wgnt_i) begin
+          vrf_pnt_d = vrf_pnt_q + valid_bytes;
+          vrf_cnt_d = vrf_cnt_q + valid_bytes;
+        end
+        `else // ARA_L1_INTF
         vrf_pnt_d = vrf_pnt_q + valid_bytes;
         vrf_cnt_d = vrf_cnt_q + valid_bytes;
+        `endif // ARA_L1_INTF
 
         // Copy data from the operands into the W channel
         for (int unsigned axi_byte = 0; axi_byte < AxiDataWidth/8; axi_byte++) begin : stu_operand_to_axi_w
@@ -320,12 +347,31 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
               automatic int unsigned vrf_lane = (vrf_byte >> 3);
 
               // Copy data
+              `ifdef ARA_L1_INTF
+              dcache_wdata_o[8*axi_byte +: 8] = stu_operand[vrf_lane][8*vrf_offset +: 8];
+              dcache_wbe_o[axi_byte]          = vinsn_issue_q.vm || mask_i[vrf_lane][vrf_offset];
+              `else
               axi_w_o.data[8*axi_byte +: 8] = stu_operand[vrf_lane][8*vrf_offset +: 8];
               axi_w_o.strb[axi_byte]        = vinsn_issue_q.vm || mask_i[vrf_lane][vrf_offset];
+              `endif
             end
           end
         end : stu_operand_to_axi_w
 
+        `ifdef ARA_L1_INTF
+        dcache_wvalid_o = 1'b1;
+        if(dcache_wgnt_i) begin
+          // Account for the beat we sent
+          axi_len_d     = axi_len_q + 1;
+          // We wrote all the beats for this AW burst
+          if ($unsigned(axi_len_d) == axi_pkg::len_t'($unsigned(axi_addrgen_req_i.len) + 1)) begin : beats_complete
+            // Ask for another burst by the address generator
+            axi_addrgen_req_ready_o = 1'b1;
+            // Reset AXI pointers
+            axi_len_d                   = '0;
+          end : beats_complete
+        end
+        `else // ARA_L1_INTF
         // Send the W beat
         axi_w_valid_o = 1'b1;
         // Account for the beat we sent
@@ -338,9 +384,14 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
           // Reset AXI pointers
           axi_len_d                   = '0;
         end : beats_complete
+        `endif // ARA_L1_INTF
 
         // We consumed a whole word from the lanes
+        `ifdef ARA_L1_INTF
+        if (dcache_wgnt_i && (vrf_pnt_d == NrLanes*8 || vrf_cnt_d == issue_cnt_bytes_q)) begin : vrf_word_done
+        `else
         if (vrf_pnt_d == NrLanes*8 || vrf_cnt_d == issue_cnt_bytes_q) begin : vrf_word_done
+        `endif
           // Reset the pointer in the VRF word
           vrf_pnt_d         = '0;
           vrf_cnt_d         = '0;
@@ -395,12 +446,15 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
     ////////////////////////////
     //  Handle the B channel  //
     ////////////////////////////
-
+    `ifdef ARA_L1_INTF
+      if(dcache_wgnt_i) begin : axi_b_valid
+    `else
     // TODO: We cannot handle errors on the B channel.
     // We just acknowledge any AXI requests that come on the B channel.
     if (axi_b_valid_i) begin : axi_b_valid
       // Acknowledge the B beat
       axi_b_ready_o = 1'b1;
+    `endif // ARA_L1_INTF
 
       // Mark the vector instruction as being done
       if (vinsn_queue_d.issue_pnt != vinsn_queue_d.commit_pnt) begin : instr_done
