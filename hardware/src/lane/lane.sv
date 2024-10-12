@@ -69,6 +69,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     input  logic                                           sldu_operand_ready_i,
     input  sldu_mux_e                                      sldu_mux_sel_i,
     input  logic                                           addrgen_operand_ready_i,
+    input  logic                                           addrgen_exception_flush_i,
     // Interface with the Slide unit
     input  logic                                           sldu_result_req_i,
     input  vid_t                                           sldu_result_id_i,
@@ -354,7 +355,8 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .ldu_result_gnt_o         (ldu_result_gnt_o        ),
     .ldu_result_final_gnt_o   (ldu_result_final_gnt_o  ),
     // Store Unit
-    .stu_exception_i          ( stu_exception_flush_i  )
+    .stu_exception_i          ( stu_exception_flush_i  ),
+    .addrgen_exception_i      (addrgen_exception_flush_i)
   );
 
   ////////////////////////////
@@ -414,6 +416,16 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     `FF(stu_exception_flush_q[i], stu_exception_flush_d[i], 1'b0)
   end
 
+  // Cut addrgen_exception path
+  logic addrgen_exception_flush;
+  logic [StuExLat:0] addrgen_exception_flush_d, addrgen_exception_flush_q;
+  assign addrgen_exception_flush_d[0] = addrgen_exception_flush_i;
+  assign addrgen_exception_flush      = StuExLat == 0 ? addrgen_exception_flush_i : addrgen_exception_flush_q[StuExLat-1];
+  for (genvar i = 0; i < StuExLat; i++) begin
+    assign addrgen_exception_flush_d[i+1] = addrgen_exception_flush_q[i];
+    `FF(addrgen_exception_flush_q[i], addrgen_exception_flush_d[i], 1'b0)
+  end
+
   operand_queues_stage #(
     .NrLanes            (NrLanes            ),
     .VLEN               (VLEN               ),
@@ -451,6 +463,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .sldu_addrgen_operand_valid_o     (sldu_addrgen_operand_opqueues_valid),
     .sldu_operand_ready_i             (sldu_operand_opqueues_ready        ),
     .addrgen_operand_ready_i          (addrgen_operand_ready_i            ),
+    .addrgen_exception_flush_i        (addrgen_exception_flush            ),
     // Mask Unit
     .mask_operand_o                   (mask_operand_o[1:0]                ),
     .mask_operand_valid_o             (mask_operand_valid_o[1:0]          ),

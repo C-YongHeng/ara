@@ -44,6 +44,7 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     output logic                                     sldu_addrgen_operand_valid_o,
     input  logic                                     addrgen_operand_ready_i,
     input  logic                                     sldu_operand_ready_i,
+    input  logic                                     addrgen_exception_flush_i,
     // Mask unit
     output elen_t              [1:0]                 mask_operand_o,
     output logic               [1:0]                 mask_operand_valid_o,
@@ -245,6 +246,9 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
   assign addrgen_operand_ready_filtered = addrgen_operand_ready_i &
     (sldu_addrgen_operand_target_fu_o == MFPU_ADDRGEN);
 
+  logic addrgen_exception_flush_filtered;
+  assign addrgen_exception_flush_filtered = addrgen_exception_flush_i & (sldu_addrgen_operand_target_fu_o == MFPU_ADDRGEN);
+
   operand_queue #(
     .CmdBufDepth        (VlduInsnQueueDepth   ),
     .DataBufDepth       (2                    ),
@@ -255,7 +259,7 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
   ) i_operand_queue_slide_addrgen_a (
     .clk_i                    (clk_i                                                       ),
     .rst_ni                   (rst_ni                                                      ),
-    .flush_i                  (1'b0                                                        ),
+    .flush_i                  (addrgen_exception_flush_filtered                            ),
     .lane_id_i                (lane_id_i                                                   ),
     .operand_queue_cmd_i      (operand_queue_cmd_i[SlideAddrGenA]                          ),
     .operand_queue_cmd_valid_i(operand_queue_cmd_valid_i[SlideAddrGenA]                    ),

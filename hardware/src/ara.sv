@@ -332,6 +332,7 @@ module ara import ara_pkg::*; #(
   sldu_mux_e                                   sldu_mux_sel;
   logic                                        addrgen_operand_ready;
   logic      [NrLanes-1:0]                     sldu_red_valid;
+  logic                                        addrgen_exception_flush;
 
   // Results
   // Load Unit
@@ -415,6 +416,7 @@ module ara import ara_pkg::*; #(
       .sldu_addrgen_operand_target_fu_o(sldu_addrgen_operand_target_fu[lane]),
       .sldu_addrgen_operand_valid_o    (sldu_addrgen_operand_valid[lane]    ),
       .addrgen_operand_ready_i         (addrgen_operand_ready               ),
+      .addrgen_exception_flush_i       (addrgen_exception_flush             ),
       .sldu_mux_sel_i                  (sldu_mux_sel                        ),
       .sldu_operand_ready_i            (sldu_operand_ready[lane]            ),
       .sldu_red_valid_i                (sldu_red_valid[lane]                ),
@@ -513,6 +515,7 @@ module ara import ara_pkg::*; #(
     .addrgen_operand_target_fu_i(sldu_addrgen_operand_target_fu                        ),
     .addrgen_operand_valid_i    (sldu_addrgen_operand_valid                            ),
     .addrgen_operand_ready_o    (addrgen_operand_ready                                 ),
+    .addrgen_exception_flush_o  (addrgen_exception_flush                               ),
     `ifndef ARA_L1_INTF
     // CSR input
     .en_ld_st_translation_i     (acc_req_i.acc_mmu_en                                  ),

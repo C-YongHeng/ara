@@ -79,7 +79,8 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     output logic                                       ldu_result_gnt_o,
     output logic                                       ldu_result_final_gnt_o,
     // Store Unit
-    input  logic                                       stu_exception_i
+    input  logic                                       stu_exception_i,
+    input  logic                                       addrgen_exception_i
   );
 
   import cf_math_pkg::idx_width;
@@ -472,6 +473,18 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
         // Flush this request
         operand_req[bank][StA] = '0;
       end : vstu_exception_idle
+
+      // Kill all addrgen requests in case of exceptions
+      if (addrgen_exception_i && (requester_index == SlideAddrGenA)) begin : addrgen_exception_idle
+        // Reset state
+        state_d = IDLE;
+        // Don't wake up the store queue (redundant, as it will be flushed anyway)
+        operand_queue_cmd_valid_o[SlideAddrGenA] = 1'b0;
+        // Clear metadata
+        requester_metadata_d = '0;
+        // Flush this request
+        operand_req[bank][SlideAddrGenA] = '0;
+      end : addrgen_exception_idle
     end : operand_requester
 
     always_ff @(posedge clk_i or negedge rst_ni) begin

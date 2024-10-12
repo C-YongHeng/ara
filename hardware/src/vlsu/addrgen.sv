@@ -85,7 +85,8 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
     input  elen_t            [NrLanes-1:0] addrgen_operand_i,
     input  target_fu_e       [NrLanes-1:0] addrgen_operand_target_fu_i,
     input  logic             [NrLanes-1:0] addrgen_operand_valid_i,
-    output logic                           addrgen_operand_ready_o
+    output logic                           addrgen_operand_ready_o,
+    output logic                           addrgen_exception_flush_o
   );
 
   localparam unsigned DataWidth = $bits(elen_t);
@@ -244,6 +245,9 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
     addrgen_exception_o.cause = '0;
     addrgen_illegal_load_o  = 1'b0;
     addrgen_illegal_store_o = 1'b0;
+
+    // cyh: need flush addrgen operands queue, just like stu
+    addrgen_exception_flush_o = 1'b0;
 
     // No valid words for the spill register
     idx_vaddr_valid_d       = 1'b0;
@@ -522,6 +526,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
     if (addrgen_exception_o.valid && addrgen_ack_o) begin
       addrgen_illegal_load_o  =  is_load(pe_req_q.op) && (addrgen_exception_o.cause == riscv::ILLEGAL_INSTR);
       addrgen_illegal_store_o = !is_load(pe_req_q.op) && (addrgen_exception_o.cause == riscv::ILLEGAL_INSTR);
+      addrgen_exception_flush_o = 1'b1;
     end
   end : addr_generation
 
@@ -707,9 +712,11 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
 
     case (axi_addrgen_state_q)
       AXI_ADDRGEN_IDLE: begin
+        idx_vaddr_ready_d = 1'b1; // always ready in IDLE
         if (addrgen_req_valid) begin
           axi_addrgen_d       = addrgen_req;
           axi_addrgen_state_d = core_st_pending_i ? AXI_ADDRGEN_WAITING_CORE_STORE_PENDING : AXI_ADDRGEN_REQUESTING;
+          idx_vaddr_ready_d = 1'b0;
 
         `ifdef ARA_VA
           trans_cur_vaddr_n = axi_addrgen_d.addr[63:0];
@@ -946,7 +953,8 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
 
           `ifdef ARA_VA
           // access TLB
-          if (trans_counter != 0 && idx_vaddr_valid_q && !paddr_fifo_full) begin
+          if (trans_counter != 0 && idx_vaddr_valid_q && !paddr_fifo_full &&
+              !is_addr_error(idx_final_vaddr_q, axi_addrgen_q.vew)) begin
             addrgen_trans_req_o = 1'b1;
             addrgen_trans_vaddr_o = idx_final_vaddr_q;
             addrgen_trans_is_store_o = ~axi_addrgen_q.is_load;
@@ -1004,17 +1012,12 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
             // Forward next vstart info to the dispatcher
             addrgen_exception_vstart_d = addrgen_req.len - axi_addrgen_q.len - 1;
             addrgen_req_ready       = 1'b1;
-            if(!axi_addrgen_queue_full) begin
-              axi_addrgen_queue = '{
-                addr            : '0,
-                size            : '0,
-                len             : '0,
-                is_load         : axi_addrgen_q.is_load,
-                is_exception    : 1'b1
-              };
-              axi_addrgen_queue_push = 1'b1;
-            end
-            axi_addrgen_state_d = axi_addrgen_queue_full? AXI_ADDRGEN_EXCEPTION : AXI_ADDRGEN_IDLE;
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+            idx_vaddr_ready_d = 1'b1; // consumed a word, too
+          end
+
+          if(idx_vaddr_valid_q && addrgen_trans_exception_i.valid) begin
+            idx_vaddr_ready_d = 1'b1; // consumed a word, too
           end
 
           // Finished generating AXI requests
@@ -1063,17 +1066,8 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
             // Forward next vstart info to the dispatcher
             addrgen_exception_vstart_d = addrgen_req.len - axi_addrgen_q.len - 1;
             addrgen_req_ready       = 1'b1;
-            if(!axi_addrgen_queue_full) begin
-              axi_addrgen_queue = '{
-                addr            : '0,
-                size            : '0,
-                len             : '0,
-                is_load         : axi_addrgen_q.is_load,
-                is_exception    : 1'b1
-              };
-              axi_addrgen_queue_push = 1'b1;
-            end
-            axi_addrgen_state_d = axi_addrgen_queue_full? AXI_ADDRGEN_EXCEPTION : AXI_ADDRGEN_IDLE;
+            axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
+            idx_vaddr_ready_d = 1'b1; // consumed a word, too
           end
 
           // Finished generating AXI requests
@@ -1504,6 +1498,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
                     addrgen_exception_vstart_d  = addrgen_req.len - axi_addrgen_q.len - 1;
                     addrgen_req_ready       = 1'b1;
                     axi_addrgen_state_d     = AXI_ADDRGEN_IDLE;
+                    idx_vaddr_ready_d       = 1'b1; // consumed a word, too
                   end : eew_misaligned_error
                   else begin : aligned_vaddress
                     // Mux target address
@@ -1592,6 +1587,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
               axi_addrgen_state_d = AXI_ADDRGEN_IDLE;
               // Signal the other FSM
               addrgen_req_ready   = 1'b1;
+              idx_vaddr_ready_d   = 1'b1; // consumed a word in index access, too
             end : mmu_exception_valid
           end : start_req
         end : axi_ax_idle
