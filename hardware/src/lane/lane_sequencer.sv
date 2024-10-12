@@ -494,7 +494,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
           operand_request[StA] = '{
             id      : pe_req.id,
             vs      : pe_req.vs1,
-            eew     : pe_req.old_eew_vs1,
+            eew     : pe_req.vtype.vsew,
             conv    : pe_req.conversion_vs1,
             scale_vl: pe_req.scale_vl,
             cvt_resize: CVT_WIDE,

@@ -2627,6 +2627,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     ara_req_d.vtype.vsew = EW8;
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
+                    ara_req_d.old_eew_vs2 = eew_q[insn.vmem_type.rs2];
                     ara_req_d.eew_vs2    = EW8;
                   end
               end
@@ -2635,6 +2636,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     ara_req_d.vtype.vsew = EW16;
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
+                    ara_req_d.old_eew_vs2 = eew_q[insn.vmem_type.rs2];
                     ara_req_d.eew_vs2    = EW16;
                   end
               end
@@ -2643,6 +2645,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     ara_req_d.vtype.vsew = EW32;
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
+                    ara_req_d.old_eew_vs2 = eew_q[insn.vmem_type.rs2];
                     ara_req_d.eew_vs2    = EW32;
                   end
               end
@@ -2651,6 +2654,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     ara_req_d.vtype.vsew = EW64;
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
+                    ara_req_d.old_eew_vs2 = eew_q[insn.vmem_type.rs2];
                     ara_req_d.eew_vs2    = EW64;
                   end
               end
@@ -2811,7 +2815,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
             // Ara does not reshuffle source vregs upon vector stores,
             // thus the operand requesters will fetch Bytes referring
             // to the encoding of the source register
-            ara_req_d.scale_vl = 1'b1;
+            ara_req_d.scale_vl = 1'b0;
 
             // These generate a request to Ara's backend
             ara_req_d.vs1       = insn.vmem_type.rd; // vs3 is encoded in the same position as rd
@@ -2829,6 +2833,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     ara_req_d.vtype.vsew = EW8; // ara_req_d.vtype.vsew is the target EEW!
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
+                    ara_req_d.old_eew_vs2 = eew_q[insn.vmem_type.rs2];
                     ara_req_d.eew_vs2    = EW8;
                   end
               end
@@ -2837,6 +2842,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     ara_req_d.vtype.vsew = EW16;
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
+                    ara_req_d.old_eew_vs2 = eew_q[insn.vmem_type.rs2];
                     ara_req_d.eew_vs2    = EW16;
                   end
               end
@@ -2845,6 +2851,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     ara_req_d.vtype.vsew = EW32;
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
+                    ara_req_d.old_eew_vs2 = eew_q[insn.vmem_type.rs2];
                     ara_req_d.eew_vs2    = EW32;
                   end
               end
@@ -2853,6 +2860,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     ara_req_d.vtype.vsew = EW64;
                   end else begin
                     ara_req_d.vtype.vsew = csr_vtype_q.vsew;
+                    ara_req_d.old_eew_vs2 = eew_q[insn.vmem_type.rs2];
                     ara_req_d.eew_vs2    = EW64;
                   end
               end
