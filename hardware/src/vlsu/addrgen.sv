@@ -7,7 +7,7 @@
 // This unit generates transactions on the AR/AW buses, upon receiving vector
 // memory operations.
 
-module addrgen import ara_pkg::*; import rvv_pkg::*; #(
+module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
     parameter int  unsigned NrLanes      = 0,
     parameter int  unsigned VLEN         = 0,
     // AXI Interface parameters
@@ -118,6 +118,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
     vew_e vew;
     logic is_load;
     logic is_burst; // Unit-strided instructions can be converted into AXI INCR bursts
+    logic is_index; // indexed access
     vlen_t vstart;
   } addrgen_req_t;
   addrgen_req_t addrgen_req;
@@ -338,6 +339,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
             is_load : is_load(pe_req_q.op),
             // Unit-strided loads/stores trigger incremental AXI bursts.
             is_burst: (pe_req_q.op inside {VLE, VSE}),
+            is_index: 1'b0,
             vstart  : pe_req_q.vstart
           };
           addrgen_req_valid = 1'b1;
@@ -383,6 +385,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
           is_load : is_load(pe_req_q.op),
           // Unit-strided loads/stores trigger incremental AXI bursts.
           is_burst: 1'b0,
+          is_index: 1'b1,
           vstart  : pe_req_q.vstart
         };
         addrgen_req_valid = 1'b1;
@@ -848,7 +851,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
           end
           `endif // ARA_VA
 
-        end else if (state_q != ADDRGEN_IDX_OP) begin
+        end else if (!axi_addrgen_q.is_index) begin
 
           /////////////////////
           //  Strided access //
