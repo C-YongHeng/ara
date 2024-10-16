@@ -498,6 +498,8 @@ module vstu import ara_pkg::*; import rvv_pkg::*; #(
       axi_addrgen_req_ready_o = axi_addrgen_req_valid_i;
       // Reset AXI pointers
       axi_len_d = '0;
+      // Reset VRF pointer
+      vrf_pnt_d = '0;
 
       // Mark the vector instruction as being done
       // if (vinsn_queue_d.issue_pnt != vinsn_queue_d.commit_pnt) begin : instr_done

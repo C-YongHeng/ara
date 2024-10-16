@@ -620,6 +620,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
 `ifdef ARA_L1_INTF
   parameter axi_pkg::size_t axi_data_size = $clog2(AxiDataWidth/8);
 
+  logic [$clog2(ELEN*NrLanes/8):0] vrf_len_d, vrf_len_q; // for misaligned store
   logic [2:0] burst_trans_len_d, burst_trans_len_q;
   logic [DCACHE_TAG_WIDTH-1:0] tag_fifo_in, tag_fifo_out;
   logic tag_fifo_empty, tag_fifo_full;
@@ -700,6 +701,8 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
 
     burst_trans_len_d = burst_trans_len_q;
 
+    vrf_len_d = vrf_len_q;
+
   `ifdef ARA_VA
     trans_cur_vaddr_n = trans_cur_vaddr;
     trans_end_vaddr_n = trans_end_vaddr;
@@ -720,6 +723,9 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           axi_addrgen_d       = addrgen_req;
           axi_addrgen_state_d = core_st_pending_i ? AXI_ADDRGEN_WAITING_CORE_STORE_PENDING : AXI_ADDRGEN_REQUESTING;
           idx_vaddr_ready_d = 1'b0;
+          // the rest byte number of one operand request
+          // When the vstart > 0, the bytes before vstart is not used, so we subtract it
+          vrf_len_d = ELEN * NrLanes/8 - ({1'b0, addrgen_req.vstart[$clog2(ELEN*NrLanes/8)-1:0]} << addrgen_req.vew);
 
         `ifdef ARA_VA
           trans_cur_vaddr_n = axi_addrgen_d.addr[63:0];
@@ -813,17 +819,36 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
                   axi_addrgen_d.len = axi_addrgen_q.len - 1;
                   burst_trans_len_d = 3'b000;
                 end
+                // next access address
+                axi_addrgen_d.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] = axi_addrgen_q.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] + 1;
+                axi_addrgen_d.addr[$clog2(AxiDataWidth/8)-1:0] = '0;
               end else begin
-                if(axi_addrgen_q.len < (((AxiDataWidth/8) - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]) >> int'(axi_addrgen_q.vew))) begin
-                  axi_addrgen_d.len = 0;
+                if(vrf_len_q < (AxiDataWidth/8 - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]) && !axi_addrgen_q.is_load) begin // the rest data less than this axi access size
+                  if(axi_addrgen_q.len < (vrf_len_q >> int'(axi_addrgen_q.vew))) begin
+                    axi_addrgen_d.len = '0;
+                  end else begin
+                    axi_addrgen_d.len = axi_addrgen_q.len - (vrf_len_q >> int'(axi_addrgen_q.vew));
+                  end
+                  axi_addrgen_d.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] = axi_addrgen_q.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)];
+                  axi_addrgen_d.addr[$clog2(AxiDataWidth/8)-1:0] = axi_addrgen_d.addr[$clog2(AxiDataWidth/8)-1:0] + vrf_len_q;
+                  vrf_len_d = ELEN * NrLanes/8;
                 end else begin
-                  axi_addrgen_d.len = axi_addrgen_q.len - (((AxiDataWidth/8) - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]) >> int'(axi_addrgen_q.vew));
+                  if(axi_addrgen_q.len < (((AxiDataWidth/8) - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]) >> int'(axi_addrgen_q.vew))) begin
+                    axi_addrgen_d.len = 0;
+                  end else begin
+                    axi_addrgen_d.len = axi_addrgen_q.len - (((AxiDataWidth/8) - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]) >> int'(axi_addrgen_q.vew));
+                  end
+                  axi_addrgen_d.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] = axi_addrgen_q.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] + 1;
+                  axi_addrgen_d.addr[$clog2(AxiDataWidth/8)-1:0] = '0;
+                  if(!axi_addrgen_q.is_load) begin
+                    if(vrf_len_q - (AxiDataWidth/8 - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]) == 0) begin
+                      vrf_len_d = ELEN * NrLanes/8;
+                    end else begin
+                      vrf_len_d = vrf_len_q - (AxiDataWidth/8 - axi_addrgen_q.addr[$clog2(AxiDataWidth/8)-1:0]);
+                    end
+                  end
                 end
               end
-
-              // next access address
-              axi_addrgen_d.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] = axi_addrgen_q.addr[AxiAddrWidth-1:$clog2(AxiDataWidth/8)] + 1;
-              axi_addrgen_d.addr[$clog2(AxiDataWidth/8)-1:0] = '0;
 
               `ifdef ARA_VA
               if(axi_addrgen_d.addr[63:12] != axi_addrgen_q.addr[63:12]) begin  // next page, pop the ppn
@@ -1139,6 +1164,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
       axi_addrgen_state_q  <= AXI_ADDRGEN_IDLE;
       axi_addrgen_q        <= '0;
       burst_trans_len_q    <= '0;
+      vrf_len_q            <= '0;
 
     `ifdef ARA_VA
       trans_cur_vaddr      <= '0;
@@ -1149,6 +1175,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
       axi_addrgen_state_q  <= axi_addrgen_state_d;
       axi_addrgen_q        <= axi_addrgen_d;
       burst_trans_len_q    <= burst_trans_len_d;
+      vrf_len_q            <= vrf_len_d;
 
     `ifdef ARA_VA
       trans_cur_vaddr      <= trans_cur_vaddr_n;
