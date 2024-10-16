@@ -305,7 +305,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
 
       // Prepare metadata upfront
       // Length of vector body in elements, i.e., vl - vstart
-      vector_body_length = operand_request_i[requester_index].vl - operand_request_i[requester_index].vstart;
+      // vector_body_length = operand_request_i[requester_index].vl - operand_request_i[requester_index].vstart;
 
       // Count the number of packets to fetch if we need to deshuffle.
       // Slide operations use the vstart signal, which does NOT correspond to the architectural
@@ -316,6 +316,9 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
                   ? 0
                   : operand_request_i[requester_index].vstart << operand_request_i[requester_index].vtype.vsew;
       vector_body_len_byte = vl_byte - vstart_byte + (vstart_byte % 8);
+      //cyh: fix BUG: it may be cross the border of a register word if scale_vl = 0 and vstart > 0, it needs additional request
+      vector_body_length = vector_body_len_byte >> operand_request_i[requester_index].vtype.vsew;
+
       vector_body_len_packets = vector_body_len_byte >> operand_request_i[requester_index].eew;
       if (vector_body_len_packets << operand_request_i[requester_index].eew < vector_body_len_byte)
         vector_body_len_packets += 1;
