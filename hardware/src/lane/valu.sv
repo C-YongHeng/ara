@@ -537,6 +537,30 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
                   end
                 end
               end
+            end else if(issue_cnt_q == 0) begin
+              // this is a vl = 0 instruction, no operand is valid
+              // issue next instrcution
+              // Reset the narrowing pointer
+              narrowing_select_d = 1'b0;
+
+              // Bump issue counter and pointers
+              vinsn_queue_d.issue_cnt = vinsn_queue_q.issue_cnt - 1;
+              if (vinsn_queue_q.issue_pnt == VInsnQueueDepth-1)
+                vinsn_queue_d.issue_pnt = '0;
+              else
+                vinsn_queue_d.issue_pnt = vinsn_queue_q.issue_pnt + 1;
+
+              // Assign vector length for next instruction in the instruction queue
+              if (vinsn_queue_d.issue_cnt != 0) begin
+                if (!(vinsn_queue_q.vinsn[vinsn_queue_d.issue_pnt].op inside {[VMANDNOT:VMXNOR]}))
+                  issue_cnt_d = vinsn_queue_q.vinsn[vinsn_queue_d.issue_pnt].vl;
+                else begin
+                  $warning("vstart was never tested for op inside {[VMANDNOT:VMXNOR]}");
+                  issue_cnt_d = (vinsn_queue_q.vinsn[vinsn_queue_d.issue_pnt].vl / 8) >>
+                    vinsn_queue_q.vinsn[vinsn_queue_d.issue_pnt].vtype.vsew;
+                  issue_cnt_d += |vinsn_queue_q.vinsn[vinsn_queue_d.issue_pnt].vl[2:0];
+                end
+              end
             end
           end
         end

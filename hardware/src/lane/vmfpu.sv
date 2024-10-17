@@ -1517,6 +1517,21 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
           end
         end
 
+        if(vinsn_issue_q_valid && !is_reduction(vinsn_issue_q.op) && issue_cnt_q == 0 && !latency_stall) begin
+          // this is a vl = 0 instruction, no operand is valid
+          // issue next instrcution
+          // Reset the input narrowing pointer
+          narrowing_select_in_d = 1'b0;
+
+          // Bump issue counter and pointers
+          vinsn_queue_d.issue_cnt = vinsn_queue_q.issue_cnt - 1;
+          if (vinsn_queue_q.issue_pnt == VInsnQueueDepth-1) vinsn_queue_d.issue_pnt = '0;
+          else vinsn_queue_d.issue_pnt = vinsn_queue_q.issue_pnt + 1;
+
+          if (vinsn_queue_d.issue_cnt != 0) issue_cnt_d =
+            vinsn_queue_q.vinsn[vinsn_queue_d.issue_pnt].vl;
+        end
+
         // Select the correct valid, result, and mask, to write in the result queue
         case (vinsn_processing_q.op) inside
           [VMUL:VSMUL]: begin
