@@ -725,7 +725,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; import ariane_pkg::*; #(
           idx_vaddr_ready_d = 1'b0;
           // the rest byte number of one operand request
           // When the vstart > 0, the bytes before vstart is not used, so we subtract it
-          vrf_len_d = ELEN * NrLanes/8 - ({1'b0, addrgen_req.vstart[$clog2(ELEN*NrLanes/8)-1:0]} << addrgen_req.vew);
+          vrf_len_d = (ELEN * NrLanes/8) - ({1'b0, (addrgen_req.vstart[$clog2(ELEN*NrLanes/8)-1:0] << addrgen_req.vew)});
 
         `ifdef ARA_VA
           trans_cur_vaddr_n = axi_addrgen_d.addr[63:0];
