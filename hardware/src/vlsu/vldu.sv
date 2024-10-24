@@ -220,6 +220,7 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
   vlen_t seq_word_wr_offset_d, seq_word_wr_offset_q;
 
   localparam unsigned DataWidthB = DataWidth / 8;
+  localparam axi_pkg::size_t axi_data_size = $clog2(AxiDataWidth/8);
 
   always_comb begin: p_vldu
     // Maintain state
@@ -276,7 +277,7 @@ module vldu import ara_pkg::*; import rvv_pkg::*; #(
       // One request only gets a AxiDataWidth-data from L1 Cache
       // So we can get valid bytes from offset
       automatic shortint unsigned lower_byte = axi_addrgen_req_i.addr[$clog2(AxiDataWidth/8)-1:0];
-      automatic shortint unsigned upper_byte = axi_addrgen_req_i.addr[$clog2(AxiDataWidth/8)-1:0] + (1 << axi_addrgen_req_i.size) - 1;
+      automatic shortint unsigned upper_byte = ( (axi_addrgen_req_i.size == axi_data_size)? AxiDataWidth/8 : (axi_addrgen_req_i.addr[$clog2(AxiDataWidth/8)-1:0] + (1 << axi_addrgen_req_i.size)) ) - 1;
 
     `else
     if (axi_r_valid_i && axi_addrgen_req_valid_i
