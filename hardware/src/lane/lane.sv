@@ -224,6 +224,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
 
   lane_sequencer #(
     .NrLanes              (NrLanes              ),
+    .vlen_t               (vlen_t               ),
     .pe_req_t             (pe_req_t             ),
     .pe_resp_t            (pe_resp_t            ),
     .operand_request_cmd_t(operand_request_cmd_t),

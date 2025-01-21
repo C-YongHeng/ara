@@ -10,6 +10,7 @@
 
 module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width; #(
     parameter int unsigned NrLanes               = 0,
+    parameter type         vlen_t                = logic,
     parameter type         pe_req_t              = logic,
     parameter type         pe_resp_t             = logic,
     parameter type         operand_request_cmd_t = logic,
@@ -593,7 +594,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
               // Extra elements to ask, because of the stride
               logic [$clog2(8*NrLanes)-1:0] extra_stride;
               // Need one bit more than vl, since we will also add the stride contribution
-              logic [$size(pe_req.vl):0] vl_tot;
+              logic [$bits(vlen_t):0] vl_tot;
 
               // We need to trim full words from the start of the vector that are not used
               // as operands by the slide unit.

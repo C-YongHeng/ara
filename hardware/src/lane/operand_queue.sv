@@ -159,8 +159,8 @@ module operand_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   //  Floating-point conversion //
   ////////////////////////////////
 
-  logic [$clog2(fp_mantissa_bits(EW16, 0))-1:0] fp16_m_lzc[2]; // 4 bits each
-  logic [$clog2(fp_mantissa_bits(EW32, 0))-1:0] fp32_m_lzc;    // 5 bits each
+  logic [fp_mantissa_index(EW16, 0)-1:0] fp16_m_lzc[2]; // 4 bits each
+  logic [fp_mantissa_index(EW32, 0)-1:0] fp32_m_lzc;    // 5 bits each
 
   fp16_t fp16[2];
   fp32_t fp32;

@@ -241,7 +241,19 @@ package ara_pkg;
     endcase
   endfunction
 
-  function automatic fp32_t fp32_from_fp16(fp16_t fp16, logic [$clog2(fp_mantissa_bits(rvv_pkg::EW16, 0)):0] fp16_m_lzc);
+  function automatic int unsigned fp_mantissa_index(rvv_pkg::vew_e fp_dtype, logic is_alt);
+    unique case ({fp_dtype, is_alt})
+      {rvv_pkg::EW8,  1'b0}: fp_mantissa_index = $clog2(2);
+      {rvv_pkg::EW8,  1'b1}: fp_mantissa_index = $clog2(3);
+      {rvv_pkg::EW16, 1'b0}: fp_mantissa_index = $clog2(10);
+      {rvv_pkg::EW16, 1'b1}: fp_mantissa_index = $clog2(7);
+      {rvv_pkg::EW32, 1'b0}: fp_mantissa_index = $clog2(23);
+      {rvv_pkg::EW64, 1'b0}: fp_mantissa_index = $clog2(52);
+      default: fp_mantissa_index = 0;
+    endcase
+  endfunction
+
+  function automatic fp32_t fp32_from_fp16(fp16_t fp16, logic [fp_mantissa_index(rvv_pkg::EW16, 0):0] fp16_m_lzc);
     automatic fp16_t fp16_temp;
     automatic fp32_t fp32;
 
@@ -265,7 +277,7 @@ package ara_pkg;
     fp32_from_fp16 = fp32;
   endfunction
 
-  function automatic fp64_t fp64_from_fp32(fp32_t fp32, logic [$clog2(fp_mantissa_bits(rvv_pkg::EW32, 0)):0] fp32_m_lzc);
+  function automatic fp64_t fp64_from_fp32(fp32_t fp32, logic [fp_mantissa_index(rvv_pkg::EW32, 0):0] fp32_m_lzc);
     automatic fp32_t fp32_temp;
     automatic fp64_t fp64;
 
